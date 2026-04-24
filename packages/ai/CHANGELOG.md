@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenAI/Azure/Anthropic provider request option forwarding to omit undefined `timeout`/`maxRetries`, avoiding SDK validation errors such as `timeout must be an integer` when provider controls are not set ([#3627](https://github.com/badlogic/pi-mono/issues/3627))
+
 ## [0.70.1] - 2026-04-24
 
 ### Added

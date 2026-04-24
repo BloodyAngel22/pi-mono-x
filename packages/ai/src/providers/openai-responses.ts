@@ -98,13 +98,12 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses", OpenAIRes
 			if (nextParams !== undefined) {
 				params = nextParams as ResponseCreateParamsStreaming;
 			}
-			const { data: openaiStream, response } = await client.responses
-				.create(params, {
-					signal: options?.signal,
-					timeout: options?.timeoutMs,
-					maxRetries: options?.maxRetries,
-				})
-				.withResponse();
+			const requestOptions = {
+				...(options?.signal ? { signal: options.signal } : {}),
+				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
+				...(options?.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
+			};
+			const { data: openaiStream, response } = await client.responses.create(params, requestOptions).withResponse();
 			await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 			stream.push({ type: "start", partial: output });
 
