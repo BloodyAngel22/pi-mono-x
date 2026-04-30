@@ -317,40 +317,47 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		});
 		// Fire extension binding without awaiting — session switch/fork returns
 		// immediately; MCPs initialize in the background.
-		void session.bindExtensions({
-			uiContext: createExtensionUIContext(),
-			commandContextActions: {
-				waitForIdle: () => session.agent.waitForIdle(),
-				newSession: async (options) => runtimeHost.newSession(options),
-				fork: async (entryId, forkOptions) => {
-					const result = await runtimeHost.fork(entryId, forkOptions);
-					return { cancelled: result.cancelled };
+		void session
+			.bindExtensions({
+				uiContext: createExtensionUIContext(),
+				commandContextActions: {
+					waitForIdle: () => session.agent.waitForIdle(),
+					newSession: async (options) => runtimeHost.newSession(options),
+					fork: async (entryId, forkOptions) => {
+						const result = await runtimeHost.fork(entryId, forkOptions);
+						return { cancelled: result.cancelled };
+					},
+					navigateTree: async (targetId, options) => {
+						const result = await session.navigateTree(targetId, {
+							summarize: options?.summarize,
+							customInstructions: options?.customInstructions,
+							replaceInstructions: options?.replaceInstructions,
+							label: options?.label,
+						});
+						return { cancelled: result.cancelled };
+					},
+					switchSession: async (sessionPath, options) => {
+						return runtimeHost.switchSession(sessionPath, options);
+					},
+					reload: async () => {
+						await session.reload();
+					},
 				},
-				navigateTree: async (targetId, options) => {
-					const result = await session.navigateTree(targetId, {
-						summarize: options?.summarize,
-						customInstructions: options?.customInstructions,
-						replaceInstructions: options?.replaceInstructions,
-						label: options?.label,
+				shutdownHandler: () => {
+					shutdownRequested = true;
+				},
+				onError: (err) => {
+					output({
+						type: "extension_error",
+						extensionPath: err.extensionPath,
+						event: err.event,
+						error: err.error,
 					});
-					return { cancelled: result.cancelled };
 				},
-				switchSession: async (sessionPath, options) => {
-					return runtimeHost.switchSession(sessionPath, options);
-				},
-				reload: async () => {
-					await session.reload();
-				},
-			},
-			shutdownHandler: () => {
-				shutdownRequested = true;
-			},
-			onError: (err) => {
-				output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
-			},
-		}).catch((err: unknown) => {
-			output({ type: "extension_error", extensionPath: "<rebind>", event: "session_start", error: String(err) });
-		});
+			})
+			.catch((err: unknown) => {
+				output({ type: "extension_error", extensionPath: "<rebind>", event: "session_start", error: String(err) });
+			});
 	};
 
 	const registerSignalHandlers = (): void => {
@@ -618,7 +625,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 			case "get_messages": {
 				const rawMessages = session.messages;
-				const entries = (session.sessionManager as any).getBranch() as Array<{ type: string; message: unknown; id: string }>;
+				const entries = (session.sessionManager as any).getBranch() as Array<{
+					type: string;
+					message: unknown;
+					id: string;
+				}>;
 				const annotated = rawMessages.map((msg) => {
 					const entry = entries.find((e) => e.type === "message" && e.message === msg);
 					return entry ? { ...msg, entryId: entry.id } : msg;

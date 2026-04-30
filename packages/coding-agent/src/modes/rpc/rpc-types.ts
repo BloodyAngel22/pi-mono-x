@@ -56,8 +56,16 @@ export type RpcCommand =
 	| { id?: string; type: "get_session_stats" }
 	| { id?: string; type: "export_html"; outputPath?: string }
 	| { id?: string; type: "switch_session"; sessionPath: string }
-	| { id?: string; type: "navigate_tree"; targetId: string; summarize?: string; customInstructions?: string; replaceInstructions?: boolean; label?: string }
-	| { id?: string; type: "fork"; entryId: string; position?: string }
+	| {
+			id?: string;
+			type: "navigate_tree";
+			targetId: string;
+			summarize?: boolean;
+			customInstructions?: string;
+			replaceInstructions?: boolean;
+			label?: string;
+	  }
+	| { id?: string; type: "fork"; entryId: string; position?: "at" | "before" }
 	| { id?: string; type: "clone" }
 	| { id?: string; type: "get_fork_messages" }
 	| { id?: string; type: "get_last_assistant_text" }
