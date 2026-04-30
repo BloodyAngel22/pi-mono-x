@@ -309,7 +309,15 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 	const rebindSession = async (): Promise<void> => {
 		session = runtimeHost.session;
-		await session.bindExtensions({
+		// Set up event routing first so MCP status events reach the frontend
+		// during async initialization (subscribe before bindExtensions resolves).
+		unsubscribe?.();
+		unsubscribe = session.subscribe((event) => {
+			output(event);
+		});
+		// Fire extension binding without awaiting — session switch/fork returns
+		// immediately; MCPs initialize in the background.
+		void session.bindExtensions({
 			uiContext: createExtensionUIContext(),
 			commandContextActions: {
 				waitForIdle: () => session.agent.waitForIdle(),
@@ -340,11 +348,8 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			onError: (err) => {
 				output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
 			},
-		});
-
-		unsubscribe?.();
-		unsubscribe = session.subscribe((event) => {
-			output(event);
+		}).catch((err: unknown) => {
+			output({ type: "extension_error", extensionPath: "<rebind>", event: "session_start", error: String(err) });
 		});
 	};
 
@@ -418,9 +423,6 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "new_session": {
 				const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
 				const result = await runtimeHost.newSession(options);
-				if (!result.cancelled) {
-					await rebindSession();
-				}
 				return success(id, "new_session", result);
 			}
 
@@ -562,17 +564,23 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 			case "switch_session": {
 				const result = await runtimeHost.switchSession(command.sessionPath);
-				if (!result.cancelled) {
-					await rebindSession();
-				}
 				return success(id, "switch_session", result);
 			}
 
+			case "navigate_tree": {
+				const result = await session.navigateTree(command.targetId, {
+					summarize: command.summarize,
+					customInstructions: command.customInstructions,
+					replaceInstructions: command.replaceInstructions,
+					label: command.label,
+				});
+				return success(id, "navigate_tree", result);
+			}
+
 			case "fork": {
-				const result = await runtimeHost.fork(command.entryId);
-				if (!result.cancelled) {
-					await rebindSession();
-				}
+				const result = await runtimeHost.fork(command.entryId, {
+					position: command.position,
+				});
 				return success(id, "fork", { text: result.selectedText, cancelled: result.cancelled });
 			}
 
@@ -582,9 +590,6 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					return error(id, "clone", "Cannot clone session: no current entry selected");
 				}
 				const result = await runtimeHost.fork(leafId, { position: "at" });
-				if (!result.cancelled) {
-					await rebindSession();
-				}
 				return success(id, "clone", { cancelled: result.cancelled });
 			}
 
@@ -612,7 +617,13 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "get_messages": {
-				return success(id, "get_messages", { messages: session.messages });
+				const rawMessages = session.messages;
+				const entries = (session.sessionManager as any).getBranch() as Array<{ type: string; message: unknown; id: string }>;
+				const annotated = rawMessages.map((msg) => {
+					const entry = entries.find((e) => e.type === "message" && e.message === msg);
+					return entry ? { ...msg, entryId: entry.id } : msg;
+				});
+				return success(id, "get_messages", { messages: annotated });
 			}
 
 			// =================================================================
