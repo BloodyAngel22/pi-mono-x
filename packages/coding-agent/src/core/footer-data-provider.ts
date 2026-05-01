@@ -128,6 +128,18 @@ export class FooterDataProvider {
 		return () => this.branchChangeCallbacks.delete(callback);
 	}
 
+	/** Update the tracked working directory (called after /cd). */
+	updateCwd(newCwd: string): void {
+		this.cwd = newCwd;
+		this.gitPaths = findGitPaths(newCwd);
+		this.cachedBranch = undefined; // force re-read
+		this.clearGitWatchers();
+		this.setupGitWatcher();
+		for (const cb of this.branchChangeCallbacks) {
+			cb();
+		}
+	}
+
 	/** Internal: set extension status */
 	setExtensionStatus(key: string, text: string | undefined): void {
 		if (text === undefined) {

@@ -52,6 +52,7 @@ export interface AppKeybindings {
 	"app.tree.filter.all": true;
 	"app.tree.filter.cycleForward": true;
 	"app.tree.filter.cycleBackward": true;
+	"app.mode.planToggle": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
@@ -194,6 +195,10 @@ export const KEYBINDINGS = {
 	"app.tree.filter.cycleForward": {
 		defaultKeys: "ctrl+o",
 		description: "Tree filter: cycle forward",
+	},
+	"app.mode.planToggle": {
+		defaultKeys: [],
+		description: "Toggle plan mode (no code execution, agent writes a plan file)",
 	},
 	"app.tree.filter.cycleBackward": {
 		defaultKeys: "shift+ctrl+o",

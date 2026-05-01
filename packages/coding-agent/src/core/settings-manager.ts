@@ -52,6 +52,20 @@ export interface MarkdownSettings {
 	codeBlockIndent?: string; // default: "  "
 }
 
+export type ToolVerbosityLevel = "full" | "compact";
+
+export interface ToolVerbositySettings {
+	mcp?: ToolVerbosityLevel; // default: "compact"
+	read?: ToolVerbosityLevel; // default: "compact"
+	find?: ToolVerbosityLevel; // default: "compact"
+	grep?: ToolVerbosityLevel; // default: "compact"
+	ls?: ToolVerbosityLevel; // default: "compact"
+	bash?: ToolVerbosityLevel; // default: "full"
+	write?: ToolVerbosityLevel; // default: "full"
+	edit?: ToolVerbosityLevel; // default: "full"
+	diff?: ToolVerbosityLevel; // default: "full"
+}
+
 export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 }
@@ -110,6 +124,7 @@ export interface Settings {
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
+	toolVerbosity?: ToolVerbositySettings; // Per-tool output verbosity level
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -1063,5 +1078,25 @@ export class SettingsManager {
 		this.globalSettings.warnings = { ...warnings };
 		this.markModified("warnings");
 		this.save();
+	}
+
+	/**
+	 * Returns the verbosity level for a given tool name.
+	 * Defaults: read/find/grep/ls/mcp → "compact"; bash/write/edit → "full"
+	 */
+	getToolVerbosityLevel(toolName: string): ToolVerbosityLevel {
+		const tv = this.settings.toolVerbosity;
+		const key = toolName as keyof ToolVerbositySettings;
+		if (tv && key in tv && tv[key] !== undefined) {
+			return tv[key] as ToolVerbosityLevel;
+		}
+		// Built-in destructive tools default to full; built-in read-only tools
+		// and all unknown (MCP) tools default to compact.
+		const fullByDefault = new Set(["bash", "write", "edit"]);
+		const knownBuiltins = new Set(["bash", "write", "edit", "read", "find", "grep", "ls"]);
+		if (fullByDefault.has(toolName)) return "full";
+		if (knownBuiltins.has(toolName)) return "compact";
+		// Unknown tool → MCP → compact
+		return "compact";
 	}
 }

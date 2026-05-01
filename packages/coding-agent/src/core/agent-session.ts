@@ -14,7 +14,8 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import type {
 	Agent,
 	AgentEvent,
@@ -71,6 +72,8 @@ import {
 import { emitSessionShutdownEvent } from "./extensions/runner.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
+import { type PermissionAskCallback, PermissionsManager } from "./permissions.js";
+import { PlanMode } from "./plan-mode.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
 import type { BranchSummaryEntry, CompactionEntry, SessionManager } from "./session-manager.js";
@@ -301,6 +304,17 @@ export class AgentSession {
 	private _toolPromptSnippets: Map<string, string> = new Map();
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
 
+	// Active working directory (may differ from sessionManager.getCwd() after /cd)
+	private _activeCwd: string | null = null;
+
+	// Permission system
+	private _permissionsManager: PermissionsManager | null = null;
+	/** Set by interactive mode to prompt the user when policy is "ask". */
+	permissionAsk: PermissionAskCallback | undefined;
+
+	// Plan mode
+	readonly planMode = new PlanMode();
+
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
@@ -323,6 +337,7 @@ export class AgentSession {
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
 		this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
+		this._permissionsManager = new PermissionsManager(config.cwd);
 		this._installAgentToolHooks();
 
 		this._buildRuntime({
@@ -334,6 +349,35 @@ export class AgentSession {
 	/** Model registry for API key resolution and model discovery */
 	get modelRegistry(): ModelRegistry {
 		return this._modelRegistry;
+	}
+
+	/** Permissions manager for allow/ask/deny policies */
+	get permissionsManager(): PermissionsManager | null {
+		return this._permissionsManager;
+	}
+
+	/** The active working directory (may differ from sessionManager.getCwd() after /cd). */
+	get activeCwd(): string {
+		return this._activeCwd ?? this._cwd;
+	}
+
+	/**
+	 * Change the active working directory.
+	 * Patches the system prompt so the model sees the new path.
+	 * Also reloads local permission rules for the new project.
+	 */
+	setCwd(newPath: string): void {
+		this._activeCwd = newPath;
+		try {
+			process.chdir(newPath);
+		} catch {
+			// Ignore errors — the bash spawnHook will still set the right cwd
+		}
+		// Reload permissions for the new project
+		this._permissionsManager?.reload(newPath);
+		// Rebuild system prompt with new cwd
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.state.systemPrompt = this._baseSystemPrompt;
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
@@ -370,8 +414,103 @@ export class AgentSession {
 	 * registered tool execution to the extension context. Tool call and tool result interception now
 	 * happens here instead of in wrappers.
 	 */
+
+	/**
+	 * Check permissions for a tool call. Returns a block result if denied, undefined if allowed.
+	 * Handles critical-deny (bash only) + user-configured allow/ask/deny rules.
+	 */
+	private async _checkToolPermission(
+		toolName: string,
+		args: Record<string, unknown>,
+	): Promise<{ block: true; reason: string } | undefined> {
+		const pm = this._permissionsManager;
+		if (!pm) return undefined;
+
+		let type: import("./permissions.js").PolicyType;
+		let value: string;
+
+		if (toolName === "bash") {
+			// Plan mode blocks bash execution
+			if (this.planMode.active) {
+				return {
+					block: true,
+					reason:
+						"[PLAN MODE] Bash execution is disabled in plan mode. Analyze the codebase using read/grep/find, then update the plan file.",
+				};
+			}
+			const cmd = String(args.command ?? "");
+			// Critical deny — always block regardless of user rules
+			const critical = pm.getCriticalDeny(cmd);
+			if (critical) {
+				return {
+					block: true,
+					reason: `[CRITICAL] Command blocked: ${critical.description}\nCommand: \`${cmd}\`\nThis command is permanently blocked. Run it manually in a terminal if you are certain it is safe.`,
+				};
+			}
+			type = "bash";
+			value = cmd;
+		} else if (toolName === "write" || toolName === "edit") {
+			const filePath = String(args.path ?? "");
+			const plansDir = join(homedir(), "tmp", ".pi", "plans");
+			// Plan files are always allowed without a permission check
+			if (filePath.startsWith(plansDir)) return undefined;
+			// Plan mode blocks all other file writes/edits
+			if (this.planMode.active) {
+				return {
+					block: true,
+					reason: `[PLAN MODE] File writes are disabled in plan mode, except for the plan file at ${this.planMode.planFilePath}.\nUpdate the plan file to record your tasks and findings.`,
+				};
+			}
+			type = "file";
+			value = filePath;
+		} else {
+			// MCP or other tools
+			const builtinTools = new Set(["read", "grep", "find", "ls"]);
+			if (builtinTools.has(toolName)) return undefined; // read-only tools always allowed
+			type = "mcp";
+			value = toolName;
+		}
+
+		const policy = pm.checkPolicy(type, value);
+
+		if (policy === "allow") return undefined;
+
+		if (policy === "deny") {
+			return {
+				block: true,
+				reason: `[DENIED] ${type} action blocked by permissions policy.\nAction: \`${value}\`\nUse /permissions to view or modify your rules.`,
+			};
+		}
+
+		// policy === "ask" — prompt the user
+		if (!this.permissionAsk) return undefined; // no UI available, allow
+
+		const decision = await this.permissionAsk({ type, value });
+		if (!decision) return undefined; // dismissed — allow
+
+		if (decision === "allow-always") {
+			pm.addRule({ type, match: value, policy: "allow" }, "local");
+			return undefined;
+		}
+		if (decision === "allow-once") {
+			return undefined;
+		}
+		if (decision === "deny-always") {
+			pm.addRule({ type, match: value, policy: "deny" }, "local");
+		}
+		// deny-once or deny-always
+		return {
+			block: true,
+			reason: `[DENIED] ${type} action denied by user.\nAction: \`${value}\``,
+		};
+	}
+
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+			// Permission check runs before extension hooks
+			const permBlock = await this._checkToolPermission(toolCall.name, args as Record<string, unknown>);
+			if (permBlock) return permBlock;
+
 			const runner = this._extensionRunner;
 			if (!runner.hasHandlers("tool_call")) {
 				return undefined;
@@ -914,7 +1053,7 @@ export class AgentSession {
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
 
 		this._baseSystemPromptOptions = {
-			cwd: this._cwd,
+			cwd: this._activeCwd ?? this._cwd,
 			skills: loadedSkills,
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,
@@ -1065,12 +1204,13 @@ export class AgentSession {
 				}
 			}
 			// Apply extension-modified system prompt, or reset to base
-			if (result?.systemPrompt) {
-				this.agent.state.systemPrompt = result.systemPrompt;
-			} else {
-				// Ensure we're using the base prompt (in case previous turn had modifications)
-				this.agent.state.systemPrompt = this._baseSystemPrompt;
+			let systemPrompt = result?.systemPrompt ?? this._baseSystemPrompt;
+			// Append plan mode instructions when active
+			const planAppend = this.planMode.buildSystemPromptAppend();
+			if (planAppend) {
+				systemPrompt = `${systemPrompt}\n\n${planAppend}`;
 			}
+			this.agent.state.systemPrompt = systemPrompt;
 		} catch (error) {
 			preflightResult?.(false);
 			throw error;
@@ -2332,7 +2472,14 @@ export class AgentSession {
 				)
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
-					bash: { commandPrefix: shellCommandPrefix, shellPath },
+					bash: {
+						commandPrefix: shellCommandPrefix,
+						shellPath,
+						spawnHook: (ctx) => {
+							if (!this._activeCwd) return ctx;
+							return { ...ctx, cwd: this._activeCwd };
+						},
+					},
 				});
 
 		this._baseToolDefinitions = new Map(

@@ -8,6 +8,8 @@ import { theme } from "../theme/theme.js";
 export interface ToolExecutionOptions {
 	showImages?: boolean;
 	imageWidthCells?: number;
+	/** When "compact", hide result output (show only call header). Expandable on demand. */
+	verbosityLevel?: "full" | "compact";
 }
 
 export class ToolExecutionComponent extends Container {
@@ -39,6 +41,7 @@ export class ToolExecutionComponent extends Container {
 	};
 	private convertedImages: Map<number, { data: string; mimeType: string }> = new Map();
 	private hideComponent = false;
+	private verbosityLevel: "full" | "compact";
 
 	constructor(
 		toolName: string,
@@ -57,6 +60,7 @@ export class ToolExecutionComponent extends Container {
 		this.builtInToolDefinition = createAllToolDefinitions(cwd)[toolName as ToolName];
 		this.showImages = options.showImages ?? true;
 		this.imageWidthCells = options.imageWidthCells ?? 60;
+		this.verbosityLevel = options.verbosityLevel ?? "full";
 		this.ui = ui;
 		this.cwd = cwd;
 
@@ -259,36 +263,42 @@ export class ToolExecutionComponent extends Container {
 			}
 
 			if (this.result) {
-				const resultRenderer = this.getResultRenderer();
-				if (!resultRenderer) {
-					const component = this.createResultFallback();
-					if (component) {
-						renderContainer.addChild(component);
-						hasContent = true;
-					}
-				} else {
-					try {
-						const component = resultRenderer(
-							{ content: this.result.content as any, details: this.result.details },
-							{ expanded: this.expanded, isPartial: this.isPartial },
-							theme,
-							this.getRenderContext(this.resultRendererComponent),
-						);
-						this.resultRendererComponent = component;
-						renderContainer.addChild(component);
-						hasContent = true;
-					} catch {
-						this.resultRendererComponent = undefined;
+				// In compact mode, hide result output unless expanded or it's an error
+				const showResult = this.verbosityLevel === "full" || this.expanded || this.result.isError;
+				if (showResult) {
+					const resultRenderer = this.getResultRenderer();
+					if (!resultRenderer) {
 						const component = this.createResultFallback();
 						if (component) {
 							renderContainer.addChild(component);
 							hasContent = true;
 						}
+					} else {
+						try {
+							const component = resultRenderer(
+								{ content: this.result.content as any, details: this.result.details },
+								{ expanded: this.expanded, isPartial: this.isPartial },
+								theme,
+								this.getRenderContext(this.resultRendererComponent),
+							);
+							this.resultRendererComponent = component;
+							renderContainer.addChild(component);
+							hasContent = true;
+						} catch {
+							this.resultRendererComponent = undefined;
+							const component = this.createResultFallback();
+							if (component) {
+								renderContainer.addChild(component);
+								hasContent = true;
+							}
+						}
 					}
 				}
 			}
 		} else {
-			this.contentText.setCustomBgFn(bgFn);
+			const isCompact = this.verbosityLevel === "compact" && !this.expanded;
+			// In compact mode don't paint a full background — the status icon conveys state
+			this.contentText.setCustomBgFn(isCompact ? undefined : bgFn);
 			this.contentText.setText(this.formatToolExecution());
 			hasContent = true;
 		}
@@ -338,6 +348,10 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private formatToolExecution(): string {
+		const isCompact = this.verbosityLevel === "compact" && !this.expanded;
+		if (isCompact) {
+			return this._formatCompactLine();
+		}
 		let text = theme.fg("toolTitle", theme.bold(this.toolName));
 		const content = JSON.stringify(this.args, null, 2);
 		if (content) {
@@ -348,5 +362,45 @@ export class ToolExecutionComponent extends Container {
 			text += `\n${output}`;
 		}
 		return text;
+	}
+
+	private _formatCompactLine(): string {
+		// Status indicator
+		const status = this.isPartial
+			? theme.fg("muted", "⏳")
+			: this.result?.isError
+				? theme.fg("error", "✗")
+				: theme.fg("success", "✓");
+
+		// Tool name
+		const name = theme.fg("toolTitle", this.toolName);
+
+		// Args summary: first string value found, or first key=value, max 60 chars
+		const argSummary = this._summarizeArgs();
+
+		const parts = [theme.fg("dim", "◆"), name];
+		if (argSummary) parts.push(theme.fg("dim", argSummary));
+		if (!this.isPartial) parts.push(status);
+
+		return parts.join(" ");
+	}
+
+	private _summarizeArgs(): string {
+		if (!this.args || typeof this.args !== "object") return "";
+		const entries = Object.entries(this.args as Record<string, unknown>);
+		if (entries.length === 0) return "";
+
+		// Find first string-valued key
+		for (const [, val] of entries) {
+			if (typeof val === "string" && val.trim()) {
+				const trimmed = val.trim().replace(/\n/g, " ");
+				return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed;
+			}
+		}
+		// Fall back to key=value of first entry
+		const [key, val] = entries[0];
+		const valStr = String(val).replace(/\n/g, " ");
+		const pair = `${key}=${valStr}`;
+		return pair.length > 60 ? `${pair.slice(0, 57)}…` : pair;
 	}
 }

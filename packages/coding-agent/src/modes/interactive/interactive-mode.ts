@@ -1560,6 +1560,7 @@ export class InteractiveMode {
 		await this.updateAvailableProviderCount();
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
+		this.setupPermissionAsk();
 	}
 
 	private async handleFatalRuntimeError(prefix: string, error: unknown): Promise<never> {
@@ -2554,6 +2555,36 @@ export class InteractiveMode {
 				await this.shutdown();
 				return;
 			}
+			if (text === "/cd" || text.startsWith("/cd ")) {
+				this.editor.setText("");
+				await this.handleCdCommand(text.startsWith("/cd ") ? text.slice(4).trim() : "");
+				return;
+			}
+			if (text === "/pwd") {
+				this.editor.setText("");
+				this.handlePwdCommand();
+				return;
+			}
+			if (text === "/ls" || text.startsWith("/ls ")) {
+				this.editor.setText("");
+				this.handleLsCommand(text.startsWith("/ls ") ? text.slice(4).trim() : "");
+				return;
+			}
+			if (text === "/permissions") {
+				this.editor.setText("");
+				await this.handlePermissionsCommand();
+				return;
+			}
+			if (text === "/plan" || text.startsWith("/plan ")) {
+				this.editor.setText("");
+				await this.handlePlanCommand(text.startsWith("/plan ") ? text.slice(6).trim() : undefined);
+				return;
+			}
+			if (text === "/execute") {
+				this.editor.setText("");
+				await this.handleExecuteCommand();
+				return;
+			}
 
 			// Handle bash command (! for normal, !! for excluded from context)
 			if (text.startsWith("!")) {
@@ -2695,6 +2726,7 @@ export class InteractiveMode {
 									{
 										showImages: this.settingsManager.getShowImages(),
 										imageWidthCells: this.settingsManager.getImageWidthCells(),
+										verbosityLevel: this.settingsManager.getToolVerbosityLevel(content.name),
 									},
 									this.getRegisteredToolDefinition(content.name),
 									this.ui,
@@ -2764,6 +2796,7 @@ export class InteractiveMode {
 						{
 							showImages: this.settingsManager.getShowImages(),
 							imageWidthCells: this.settingsManager.getImageWidthCells(),
+							verbosityLevel: this.settingsManager.getToolVerbosityLevel(event.toolName),
 						},
 						this.getRegisteredToolDefinition(event.toolName),
 						this.ui,
@@ -3104,6 +3137,7 @@ export class InteractiveMode {
 							{
 								showImages: this.settingsManager.getShowImages(),
 								imageWidthCells: this.settingsManager.getImageWidthCells(),
+								verbosityLevel: this.settingsManager.getToolVerbosityLevel(content.name),
 							},
 							this.getRegisteredToolDefinition(content.name),
 							this.ui,
@@ -5395,6 +5429,200 @@ export class InteractiveMode {
 		} catch {
 			// Ignore, will be emitted as an event
 		}
+	}
+
+	// =========================================================================
+	// CWD commands
+	// =========================================================================
+
+	private async handleCdCommand(arg: string): Promise<void> {
+		const base = this.session.activeCwd;
+		if (!arg) {
+			const entries = this._listDir(base);
+			this.showStatus(`cwd: ${this.shortPath(base)}\n\n${entries}`);
+			return;
+		}
+		const target = path.resolve(base, this.expandHome(arg));
+		if (!fs.existsSync(target)) {
+			this.showError(`cd: no such directory: ${target}`);
+			return;
+		}
+		let isDir = false;
+		try {
+			isDir = fs.statSync(target).isDirectory();
+		} catch {
+			/* ignore */
+		}
+		if (!isDir) {
+			this.showError(`cd: not a directory: ${target}`);
+			return;
+		}
+		this.session.setCwd(target);
+		this.footerDataProvider.updateCwd(target);
+		const entries = this._listDir(target);
+		this.showStatus(`→ ${this.shortPath(target)}\n\n${entries}`);
+		// Inject a one-shot message so the model sees the change in conversation history
+		await this.session.sendCustomMessage({
+			customType: "cwd-change",
+			content: `[Working directory changed to: ${target}]`,
+			display: false,
+		});
+		this.ui.requestRender();
+	}
+
+	private handlePwdCommand(): void {
+		this.showStatus(this.session.activeCwd);
+	}
+
+	private handleLsCommand(arg: string): void {
+		const base = this.session.activeCwd;
+		const dir = arg ? path.resolve(base, this.expandHome(arg)) : base;
+		if (!fs.existsSync(dir)) {
+			this.showError(`ls: no such path: ${dir}`);
+			return;
+		}
+		const entries = this._listDir(dir);
+		this.showStatus(`${this.shortPath(dir)}:\n\n${entries}`);
+	}
+
+	private expandHome(p: string): string {
+		const h = os.homedir();
+		return p.startsWith("~/") ? h + p.slice(1) : p === "~" ? h : p;
+	}
+
+	private shortPath(p: string): string {
+		const h = os.homedir();
+		return p.startsWith(h) ? `~${p.slice(h.length)}` : p;
+	}
+
+	private _listDir(dir: string): string {
+		try {
+			const all = fs.readdirSync(dir);
+			const shown = all.slice(0, 30);
+			const formatted = shown.map((e) => {
+				try {
+					return fs.statSync(path.resolve(dir, e)).isDirectory() ? `${e}/` : e;
+				} catch {
+					return e;
+				}
+			});
+			const suffix = all.length > 30 ? `\n  … (${all.length - 30} more)` : "";
+			return formatted.join("  ") + suffix;
+		} catch {
+			return "(unreadable)";
+		}
+	}
+
+	// =========================================================================
+	// Permissions command
+	// =========================================================================
+
+	private async handlePermissionsCommand(): Promise<void> {
+		const pm = this.session.permissionsManager;
+		if (!pm) {
+			this.showStatus("Permissions manager not available.");
+			return;
+		}
+		const rules = pm.getAllRules();
+		const defaultPolicy = pm.getDefaultPolicy();
+		const lines: string[] = [
+			`Default policy: ${defaultPolicy}`,
+			`Global config:  ${pm.getGlobalPath()}`,
+			`Local config:   ${pm.getLocalPath()}`,
+			"─".repeat(50),
+		];
+		if (rules.length === 0) {
+			lines.push("(no user rules configured)");
+		} else {
+			for (const r of rules) {
+				const icon = r.policy === "allow" ? "✓" : r.policy === "deny" ? "✗" : "?";
+				lines.push(`[${r.scope}] ${icon} ${r.type}  ${r.match}  →  ${r.policy}`);
+			}
+		}
+		lines.push("─".repeat(50));
+		lines.push("Use /permissions to view. Edit files directly to add/remove rules.");
+		this.showStatus(lines.join("\n"));
+	}
+
+	// =========================================================================
+	// Plan mode commands
+	// =========================================================================
+
+	private async handlePlanCommand(name?: string): Promise<void> {
+		const planMode = this.session.planMode;
+		if (planMode.active) {
+			this.showStatus(
+				`Already in plan mode. Plan file: ${planMode.planFilePath}\nUse /execute to exit planning and start execution.`,
+			);
+			return;
+		}
+		const filePath = planMode.enter(name);
+		this.footerDataProvider.setExtensionStatus("plan-mode", "[PLAN]");
+		this.showStatus(
+			`Plan mode active.\nPlan file: ${filePath}\nThe agent will analyze the codebase and write a plan. Use /execute when ready.`,
+		);
+		this.ui.requestRender();
+	}
+
+	private async handleExecuteCommand(): Promise<void> {
+		const planMode = this.session.planMode;
+		if (!planMode.active) {
+			this.showStatus("Not in plan mode. Use /plan [name] to start planning.");
+			return;
+		}
+		const executeMessage = planMode.buildExecuteMessage();
+		planMode.exit();
+		this.footerDataProvider.setExtensionStatus("plan-mode", undefined);
+		this.showStatus("Plan mode ended. Starting execution.");
+		this.ui.requestRender();
+		if (executeMessage) {
+			try {
+				await this.session.prompt(executeMessage);
+			} catch (error) {
+				this.showError(error instanceof Error ? error.message : String(error));
+			}
+		}
+	}
+
+	// =========================================================================
+	// Permission ask callback (set on session during initialization)
+	// =========================================================================
+
+	private setupPermissionAsk(): void {
+		this.session.permissionAsk = async (info) => {
+			const typeLabel = info.type === "bash" ? "Command" : info.type === "file" ? "File" : "Tool";
+			const title = `Permission required`;
+			const detail = info.value.length > 80 ? `${info.value.slice(0, 77)}...` : info.value;
+			const message = `${typeLabel}: ${detail}`;
+			const choices = [`Allow once`, `Allow always (save rule)`, `Deny once`, `Deny always (save rule)`];
+			const choice = await this.showExtensionSelectorAsync(`${title}\n${message}`, choices);
+			if (!choice) return null;
+			if (choice === "Allow once") return "allow-once";
+			if (choice === "Allow always (save rule)") return "allow-always";
+			if (choice === "Deny once") return "deny-once";
+			if (choice === "Deny always (save rule)") return "deny-always";
+			return null;
+		};
+	}
+
+	private showExtensionSelectorAsync(title: string, options: string[]): Promise<string | undefined> {
+		return new Promise((resolve) => {
+			this.showSelector((done) => {
+				const selector = new ExtensionSelectorComponent(
+					title,
+					options,
+					(choice: string) => {
+						done();
+						resolve(choice);
+					},
+					() => {
+						done();
+						resolve(undefined);
+					},
+				);
+				return { component: selector, focus: selector };
+			});
+		});
 	}
 
 	stop(): void {

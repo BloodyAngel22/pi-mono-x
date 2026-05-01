@@ -74,4 +74,15 @@ export {
 	type TurnStartEvent,
 	type WorkingIndicatorOptions,
 } from "./extensions/index.js";
+export {
+	type PermissionAskCallback,
+	type PermissionCheckInfo,
+	type PermissionDecision,
+	type PermissionRule,
+	type PermissionsConfig,
+	PermissionsManager,
+	type PolicyType,
+	type PolicyValue,
+} from "./permissions.js";
+export { PlanMode, type PlanModeState } from "./plan-mode.js";
 export { createSyntheticSourceInfo } from "./source-info.js";

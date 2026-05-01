@@ -90,7 +90,7 @@ export class FooterComponent implements Component {
 		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
 
 		// Replace home directory with ~
-		let pwd = this.session.sessionManager.getCwd();
+		let pwd = this.session.activeCwd;
 		const home = process.env.HOME || process.env.USERPROFILE;
 		if (home && pwd.startsWith(home)) {
 			pwd = `~${pwd.slice(home.length)}`;
@@ -106,6 +106,11 @@ export class FooterComponent implements Component {
 		const sessionName = this.session.sessionManager.getSessionName();
 		if (sessionName) {
 			pwd = `${pwd} • ${sessionName}`;
+		}
+
+		// Show plan mode indicator
+		if (this.session.planMode.active) {
+			pwd = `${theme.fg("accent", theme.bold("[PLAN]"))} ${pwd}`;
 		}
 
 		// Build stats line
