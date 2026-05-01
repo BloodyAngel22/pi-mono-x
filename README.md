@@ -1,76 +1,118 @@
-<p align="center">
-  <a href="https://pi.dev">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://pi.dev/logo.svg">
-      <source media="(prefers-color-scheme: light)" srcset="https://huggingface.co/buckets/julien-c/my-training-bucket/resolve/pi-logo-dark.svg">
-      <img alt="pi logo" src="https://pi.dev/logo.svg" width="128">
-    </picture>
-  </a>
-</p>
-<p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://github.com/badlogic/pi-mono/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/badlogic/pi-mono/ci.yml?style=flat-square&branch=main" /></a>
-</p>
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
-</p>
+# pi-x
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Форк [pi-mono](https://github.com/badlogic/pi-mono) с улучшенным UI, системой прав и компактным режимом MCP.
 
----
+## Что изменено по сравнению с оригиналом
 
-# Pi Monorepo
+### Система прав доступа (permissions)
 
-> **Looking for the pi coding agent?** See **[packages/coding-agent](packages/coding-agent)** for installation and usage.
+Гибкое управление тем, какие команды агент может выполнять без подтверждения:
 
-Tools for building AI agents and managing LLM deployments.
+- Вложенный формат `permissions.json` с секциями `bash`, `mcp`, `file` и политиками `allow` / `ask` / `deny`
+- Автоматическая миграция из старого плоского формата
+- Разбор составных bash-команд (`&&`, `||`, `;`, `|`) -- побеждает самая строгая политика
+- Встроенные критические блокировки (`rm -rf /`, `dd of=/dev/...`, fork-bomb и т.д.)
+- Управление через `/permissions`
 
-## Share your OSS coding agent sessions
+Глобальный файл: `~/.pi/agent/permissions.json`
+Локальный (для проекта): `<project>/.pi/permissions.json`
 
-If you use pi or other coding agents for open source work, please share your sessions.
-
-Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
-
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
-
-To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
-
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pi-mono` sessions.
-
-I regularly publish my own `pi-mono` work sessions here:
-
-- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
-
-## Packages
-
-| Package | Description |
-|---------|-------------|
-| **[@mariozechner/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
-| **[@mariozechner/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@mariozechner/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
-| **[@mariozechner/pi-mom](packages/mom)** | Slack bot that delegates messages to the pi coding agent |
-| **[@mariozechner/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
-| **[@mariozechner/pi-web-ui](packages/web-ui)** | Web components for AI chat interfaces |
-| **[@mariozechner/pi-pods](packages/pods)** | CLI for managing vLLM deployments on GPU pods |
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).
-
-## Development
-
-```bash
-npm install          # Install all dependencies
-npm run build        # Build all packages
-npm run check        # Lint, format, and type check
-./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pi-test.sh         # Run pi from sources (can be run from any directory)
+Пример:
+```json
+{
+  "defaultPolicy": "ask",
+  "bash": {
+    "allow": ["ls *", "cat *", "pwd", "grep *", "find *"],
+    "ask": ["git *", "npm *", "rm *"]
+  },
+  "mcp": {
+    "allow": ["searxng_web_search", "query-docs"]
+  }
+}
 ```
 
-> **Note:** `npm run check` requires `npm run build` to be run first. The web-ui package uses `tsc` which needs compiled `.d.ts` files from dependencies.
+### Plan Mode
 
-## License
+- `/plan <описание>` -- агент анализирует код и составляет план, не выполняя команд
+- `/execute` -- выход из режима планирования и выполнение плана
+- Автоматическое разрешение записи в plan-файлы
+
+### Новые slash-команды
+
+| Команда | Описание |
+|---------|----------|
+| `/cd <path>` | Сменить рабочую директорию |
+| `/pwd` | Показать текущую директорию |
+| `/ls [path]` | Показать содержимое директории |
+| `/permissions` | Просмотр и управление правами доступа |
+| `/plan <desc>` | Войти в режим планирования |
+| `/execute` | Выполнить план |
+
+## Установка
+
+### Из исходников (рекомендуется)
+
+```bash
+git clone https://github.com/BloodyAngel22/pi-mono-x.git
+cd pi-mono-x
+npm install
+./build.sh              # Собрать все пакеты
+cd packages/coding-agent
+npm link
+```
+
+Запуск:
+```bash
+pi
+```
+
+### Сборка с опциями
+
+```bash
+./build.sh --clean      # Очистить dist перед сборкой
+./build.sh --no-web-ui  # Пропустить web-ui (быстрее, для CLI не нужен)
+```
+
+## Настройка провайдера
+
+После установки нужно подключить API-ключ. Например, для Anthropic:
+
+```bash
+export ANTHROPIC_API_KEY="sk-..."
+```
+
+Или через интерактивный вход:
+```
+/login
+```
+
+Поддерживаемые провайдеры: Anthropic, OpenAI, Google Gemini, Groq, xAI, OpenRouter и другие.
+Полный список: [packages/coding-agent/docs/providers.md](packages/coding-agent/docs/providers.md)
+
+## Разработка
+
+```bash
+npm install          # Установить зависимости
+./build.sh           # Собрать все пакеты
+npm run check        # Линтинг, форматирование, проверка типов
+./test.sh            # Запуск тестов
+./pi-test.sh         # Запуск pi-x из исходников
+```
+
+## Пакеты
+
+| Пакет | Описание |
+|-------|----------|
+| **[pi-ai](packages/ai)** | Единый API для LLM-провайдеров (OpenAI, Anthropic, Google и др.) |
+| **[pi-agent-core](packages/agent)** | Рантайм агента с вызовом инструментов |
+| **[pi-coding-agent](packages/coding-agent)** | Интерактивный CLI-агент для кодинга |
+| **[pi-tui](packages/tui)** | Библиотека терминального UI |
+| **[pi-web-ui](packages/web-ui)** | Веб-компоненты для AI-чатов |
+
+## Upstream
+
+Оригинальный проект: [badlogic/pi-mono](https://github.com/badlogic/pi-mono)
+
+## Лицензия
 
 MIT

@@ -445,6 +445,17 @@ export async function loadExtensions(paths: string[], cwd: string, eventBus?: Ev
 	};
 }
 
+/**
+ * Return file paths for extensions bundled with the pi-x package.
+ * These live in `<package-root>/bundled-extensions/` and are always loaded.
+ */
+export function getBundledExtensionPaths(): string[] {
+	const __dirname = path.dirname(fileURLToPath(import.meta.url));
+	// src/core/extensions/ or dist/core/extensions/ → up 3 levels → package root
+	const bundledDir = path.resolve(__dirname, "..", "..", "..", "bundled-extensions");
+	return discoverExtensionsInDir(bundledDir);
+}
+
 interface PiManifest {
 	extensions?: string[];
 	themes?: string[];

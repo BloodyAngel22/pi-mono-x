@@ -7,6 +7,7 @@ export type { SourceInfo } from "../source-info.js";
 export {
 	createExtensionRuntime,
 	discoverAndLoadExtensions,
+	getBundledExtensionPaths,
 	loadExtensionFromFactory,
 	loadExtensions,
 } from "./loader.js";
