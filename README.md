@@ -119,6 +119,17 @@ export ANTHROPIC_API_KEY="sk-..."
 Поддерживаемые провайдеры: Anthropic, OpenAI, Google Gemini, Groq, xAI, OpenRouter и другие.
 Полный список: [packages/coding-agent/docs/providers.md](packages/coding-agent/docs/providers.md)
 
+## Документация
+
+| Тема | Описание |
+|------|----------|
+| **[Настройки](docs/settings.md)** | Параметры `settings.json`: модель, тема, компактизация, verbose и др. |
+| **[Права доступа](docs/permissions.md)** | Конфигурация `permissions.json`: bash, MCP, файловые политики |
+| **[MCP-серверы](docs/mcp.md)** | Подключение context7, searxng, ddg-search, serena и других |
+| **[Темы](docs/themes.md)** | Создание кастомных цветовых тем |
+| **[Суб-агенты](packages/coding-agent/docs/subagents.md)** | Система делегирования задач и кастомные агенты |
+| **[Провайдеры](packages/coding-agent/docs/providers.md)** | Настройка API-ключей и провайдеров |
+
 ## Разработка
 
 ```bash
