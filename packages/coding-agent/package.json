@@ -38,6 +38,7 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.11.0",
 		"@mariozechner/jiti": "^2.6.2",
 		"@mariozechner/pi-agent-core": "^0.70.6",
 		"@mariozechner/pi-ai": "^0.70.6",

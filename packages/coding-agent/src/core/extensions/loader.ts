@@ -15,6 +15,11 @@ import * as _bundledPiAi from "@mariozechner/pi-ai";
 import * as _bundledPiAiOauth from "@mariozechner/pi-ai/oauth";
 import type { KeyId } from "@mariozechner/pi-tui";
 import * as _bundledPiTui from "@mariozechner/pi-tui";
+import * as _bundledMcpSdkClient from "@modelcontextprotocol/sdk/client/index.js";
+import * as _bundledMcpSdkSse from "@modelcontextprotocol/sdk/client/sse.js";
+import * as _bundledMcpSdkStdio from "@modelcontextprotocol/sdk/client/stdio.js";
+import * as _bundledMcpSdkHttp from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import * as _bundledMcpSdkTypes from "@modelcontextprotocol/sdk/types.js";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
 // The virtualModules option then makes them available to extensions.
@@ -43,6 +48,11 @@ import type {
 
 /** Modules available to extensions via virtualModules (for compiled Bun binary) */
 const VIRTUAL_MODULES: Record<string, unknown> = {
+	"@modelcontextprotocol/sdk/client/index.js": _bundledMcpSdkClient,
+	"@modelcontextprotocol/sdk/client/sse.js": _bundledMcpSdkSse,
+	"@modelcontextprotocol/sdk/client/stdio.js": _bundledMcpSdkStdio,
+	"@modelcontextprotocol/sdk/client/streamableHttp.js": _bundledMcpSdkHttp,
+	"@modelcontextprotocol/sdk/types.js": _bundledMcpSdkTypes,
 	typebox: _bundledTypebox,
 	"typebox/compile": _bundledTypeboxCompile,
 	"typebox/value": _bundledTypeboxValue,
@@ -552,6 +562,7 @@ function discoverExtensionsInDir(dir: string): string[] {
 
 			// 2 & 3. Subdirectories
 			if (entry.isDirectory() || entry.isSymbolicLink()) {
+				if (entry.name.endsWith(".disabled")) continue;
 				const entries = resolveExtensionEntries(entryPath);
 				if (entries) {
 					discovered.push(...entries);

@@ -229,6 +229,19 @@ export {
 	type SkillFrontmatter,
 } from "./core/skills.js";
 export { createSyntheticSourceInfo } from "./core/source-info.js";
+// Subagent system
+export {
+	loadAgents,
+	type SubagentConfig,
+	type SubagentEvent,
+	type SubagentEventListener,
+	SubagentManager,
+	type SubagentResult,
+	type SubagentRunOptions,
+	type SubagentSessionFactory,
+	type SubagentTask,
+	type SubagentTaskStatus,
+} from "./core/subagent/index.js";
 // Tools
 export {
 	type BashOperations,

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added sub-agent system: `task` tool delegates work to isolated agent sessions with fresh context windows, saving tokens and enabling parallel execution. Includes custom agent definitions (`.pi/agents/`), MCP tool pass-through, `/tasks` and `/agents` commands, and `SubagentManager` SDK export.
 - Added top-level `name` support to `pi.registerProvider()` so extension-registered providers can show a friendly name in `/login` ([#3956](https://github.com/badlogic/pi-mono/issues/3956)).
 - Added `ctx.ui.getEditorComponent()` so extensions can wrap the currently configured custom editor factory ([#3935](https://github.com/badlogic/pi-mono/issues/3935)).
 
