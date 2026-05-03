@@ -485,18 +485,20 @@ export class AgentSession {
 		// policy === "ask" — prompt the user
 		if (!this.permissionAsk) return undefined; // no UI available, allow
 
-		const decision = await this.permissionAsk({ type, value });
-		if (!decision) return undefined; // dismissed — allow
+		const result = await this.permissionAsk({ type, value });
+		if (!result) return undefined; // dismissed — allow
+
+		const { decision, scope } = result;
 
 		if (decision === "allow-always") {
-			pm.addRule({ type, match: value, policy: "allow" }, "local");
+			pm.addRule({ type, match: value, policy: "allow" }, scope ?? "local");
 			return undefined;
 		}
 		if (decision === "allow-once") {
 			return undefined;
 		}
 		if (decision === "deny-always") {
-			pm.addRule({ type, match: value, policy: "deny" }, "local");
+			pm.addRule({ type, match: value, policy: "deny" }, scope ?? "local");
 		}
 		// deny-once or deny-always
 		return {

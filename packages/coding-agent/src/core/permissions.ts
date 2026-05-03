@@ -64,6 +64,13 @@ interface LegacyPermissionsConfig {
 
 export type PermissionDecision = "allow-once" | "allow-always" | "deny-once" | "deny-always";
 
+export type PermissionScope = "local" | "global" | "session";
+
+export interface PermissionDecisionResult {
+	decision: PermissionDecision;
+	scope?: PermissionScope;
+}
+
 export interface PermissionCheckInfo {
 	type: PolicyType;
 	/** The command text (bash), file path (file), or tool name (mcp) */
@@ -71,7 +78,7 @@ export interface PermissionCheckInfo {
 }
 
 /** Callback used to prompt the user when policy is "ask". Returns null if no UI available. */
-export type PermissionAskCallback = (info: PermissionCheckInfo) => Promise<PermissionDecision | null>;
+export type PermissionAskCallback = (info: PermissionCheckInfo) => Promise<PermissionDecisionResult | null>;
 
 // ============================================================================
 // Critical deny patterns (hardcoded, cannot be overridden by user rules)
@@ -216,6 +223,7 @@ function splitCompoundCommand(cmd: string): string[] {
 export class PermissionsManager {
 	private _global: PermissionsConfig = {};
 	private _local: PermissionsConfig = {};
+	private _session: PermissionsConfig = {};
 	private readonly _globalPath: string;
 	private _localPath: string;
 
@@ -330,7 +338,9 @@ export class PermissionsManager {
 	}
 
 	private _checkSinglePolicy(type: PolicyType, value: string): PolicyValue {
-		// Local section takes priority
+		// Session rules take highest priority, then local, then global
+		const sessionResult = this._checkSection(this._session[type], value);
+		if (sessionResult !== null) return sessionResult;
 		const localResult = this._checkSection(this._local[type], value);
 		if (localResult !== null) return localResult;
 		const globalResult = this._checkSection(this._global[type], value);
@@ -355,12 +365,11 @@ export class PermissionsManager {
 	}
 
 	/**
-	 * Add a rule and persist to disk.
-	 * @param scope "global" saves to ~/.pi/agent/permissions.json; "local" saves to <cwd>/.pi/permissions.json
+	 * Add a rule and persist to disk (or store in-memory for session scope).
+	 * @param scope "global" saves to ~/.pi/agent/permissions.json; "local" saves to <cwd>/.pi/permissions.json; "session" keeps in memory only
 	 */
-	addRule(rule: PermissionRule, scope: "global" | "local"): void {
-		const filePath = scope === "global" ? this._globalPath : this._localPath;
-		const config = scope === "global" ? this._global : this._local;
+	addRule(rule: PermissionRule, scope: PermissionScope): void {
+		const config = scope === "global" ? this._global : scope === "local" ? this._local : this._session;
 
 		// Remove any existing entry for same type+match across all policies
 		if (!config[rule.type]) config[rule.type] = {};
@@ -374,13 +383,15 @@ export class PermissionsManager {
 		if (!section[rule.policy]) section[rule.policy] = [];
 		(section[rule.policy] as string[]).push(rule.match);
 
-		this._saveFile(filePath, config);
+		if (scope !== "session") {
+			const filePath = scope === "global" ? this._globalPath : this._localPath;
+			this._saveFile(filePath, config);
+		}
 	}
 
-	/** Remove a rule from local or global config. */
-	removeRule(type: PolicyType, match: string, scope: "global" | "local"): void {
-		const filePath = scope === "global" ? this._globalPath : this._localPath;
-		const config = scope === "global" ? this._global : this._local;
+	/** Remove a rule from local, global, or session config. */
+	removeRule(type: PolicyType, match: string, scope: PermissionScope): void {
+		const config = scope === "global" ? this._global : scope === "local" ? this._local : this._session;
 		const section = config[type];
 		if (!section) return;
 		for (const policy of ["allow", "ask", "deny"] as PolicyValue[]) {
@@ -388,13 +399,17 @@ export class PermissionsManager {
 				section[policy] = section[policy].filter((p) => p !== match);
 			}
 		}
-		this._saveFile(filePath, config);
+		if (scope !== "session") {
+			const filePath = scope === "global" ? this._globalPath : this._localPath;
+			this._saveFile(filePath, config);
+		}
 	}
 
-	/** Get all merged rules (local + global) as a flat list. Local rules listed first. */
-	getAllRules(): Array<PermissionRule & { scope: "global" | "local" }> {
-		const result: Array<PermissionRule & { scope: "global" | "local" }> = [];
+	/** Get all merged rules (session + local + global) as a flat list. Session rules listed first. */
+	getAllRules(): Array<PermissionRule & { scope: PermissionScope }> {
+		const result: Array<PermissionRule & { scope: PermissionScope }> = [];
 		for (const [scopeLabel, config] of [
+			["session", this._session],
 			["local", this._local],
 			["global", this._global],
 		] as const) {

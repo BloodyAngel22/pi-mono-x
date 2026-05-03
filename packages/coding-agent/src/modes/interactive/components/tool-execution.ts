@@ -1,6 +1,6 @@
 import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@mariozechner/pi-tui";
 import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.js";
-import { createAllToolDefinitions, type ToolName } from "../../../core/tools/index.js";
+import { allToolNames, createAllToolDefinitions, type ToolName } from "../../../core/tools/index.js";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.js";
 import { convertToPng } from "../../../utils/image-convert.js";
 import { theme } from "../theme/theme.js";
@@ -372,15 +372,26 @@ export class ToolExecutionComponent extends Container {
 				? theme.fg("error", "✗")
 				: theme.fg("success", "✓");
 
+		// Type label: built-in tools use their name, others are [mcp]
+		const typeLabel = allToolNames.has(this.toolName as ToolName)
+			? theme.fg("muted", `[${this.toolName}]`)
+			: theme.fg("muted", "[mcp]");
+
 		// Tool name
 		const name = theme.fg("toolTitle", this.toolName);
 
 		// Args summary: first string value found, or first key=value, max 60 chars
 		const argSummary = this._summarizeArgs();
 
-		const parts = [theme.fg("dim", "◆"), name];
+		const parts = [theme.fg("dim", "◆"), typeLabel, name];
 		if (argSummary) parts.push(theme.fg("dim", argSummary));
 		if (!this.isPartial) parts.push(status);
+
+		// Brief result summary (non-error, after completion)
+		if (!this.isPartial && !this.result?.isError) {
+			const resultSummary = this._summarizeResult();
+			if (resultSummary) parts.push(theme.fg("muted", resultSummary));
+		}
 
 		return parts.join(" ");
 	}
@@ -402,5 +413,14 @@ export class ToolExecutionComponent extends Container {
 		const valStr = String(val).replace(/\n/g, " ");
 		const pair = `${key}=${valStr}`;
 		return pair.length > 60 ? `${pair.slice(0, 57)}…` : pair;
+	}
+
+	private _summarizeResult(): string {
+		const output = this.getTextOutput();
+		if (!output) return "";
+		const firstLine = output.split("\n").find((l) => l.trim().length > 0);
+		if (!firstLine) return "";
+		const trimmed = firstLine.trim();
+		return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed;
 	}
 }

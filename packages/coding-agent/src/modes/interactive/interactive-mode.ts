@@ -5584,18 +5584,38 @@ export class InteractiveMode {
 
 	private setupPermissionAsk(): void {
 		this.session.permissionAsk = async (info) => {
+			// Bell + visual notification so the user notices the prompt
+			process.stdout.write("\x07");
 			const typeLabel = info.type === "bash" ? "Command" : info.type === "file" ? "File" : "Tool";
-			const title = `Permission required`;
 			const detail = info.value.length > 80 ? `${info.value.slice(0, 77)}...` : info.value;
+			this.showWarning(`Permission required - ${typeLabel}: ${detail}`);
+
+			const title = `Permission required`;
 			const message = `${typeLabel}: ${detail}`;
 			const choices = [`Allow once`, `Allow always (save rule)`, `Deny once`, `Deny always (save rule)`];
 			const choice = await this.showExtensionSelectorAsync(`${title}\n${message}`, choices);
 			if (!choice) return null;
-			if (choice === "Allow once") return "allow-once";
-			if (choice === "Allow always (save rule)") return "allow-always";
-			if (choice === "Deny once") return "deny-once";
-			if (choice === "Deny always (save rule)") return "deny-always";
-			return null;
+
+			if (choice === "Allow once") return { decision: "allow-once" as const };
+			if (choice === "Deny once") return { decision: "deny-once" as const };
+
+			// For "always" decisions, ask where to save the rule
+			const decision = choice === "Allow always (save rule)" ? ("allow-always" as const) : ("deny-always" as const);
+			const scopeChoices = [
+				`Current project (.pi/permissions.json)`,
+				`Global (~/.pi/agent/permissions.json)`,
+				`This session only (in memory)`,
+			];
+			const scopeChoice = await this.showExtensionSelectorAsync("Save rule to:", scopeChoices);
+			if (!scopeChoice)
+				return { decision: decision === "allow-always" ? ("allow-once" as const) : ("deny-once" as const) };
+
+			let scope: "local" | "global" | "session";
+			if (scopeChoice.startsWith("Global")) scope = "global";
+			else if (scopeChoice.startsWith("This session")) scope = "session";
+			else scope = "local";
+
+			return { decision, scope };
 		};
 	}
 
