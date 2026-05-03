@@ -95,6 +95,7 @@ export default function (pi: ExtensionAPI): void {
 				tools: opts.tools,
 				customTools: opts.customTools,
 				model: opts.model,
+				modelRegistry: currentCtx?.modelRegistry,
 			});
 
 			return {
@@ -207,6 +208,7 @@ export default function (pi: ExtensionAPI): void {
 					cwd,
 					agent: agentConfig,
 					parentMcpTools: mcpToolDefs.length > 0 ? mcpToolDefs : undefined,
+					model: ctx?.model,
 				});
 
 				return {
