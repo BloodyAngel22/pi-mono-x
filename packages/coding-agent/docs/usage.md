@@ -53,6 +53,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/reload` | Reload keybindings, extensions, skills, prompts, and context files |
 | `/checkpoint` | Show files modified/created by the agent in this session |
 | `/undo` | Revert all agent file changes back to their pre-session state |
+| `/redo` | Reapply agent file changes that were reverted by `/undo` |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
 | `/quit` | Quit pi |

@@ -52,6 +52,20 @@ Deleted (1):
 
 If the agent has not modified any files yet, `/undo` reports "Nothing to undo."
 
+### `/redo`
+
+Reapplies the agent's changes that were reverted by `/undo`. If multiple files were undone, opens a selector (same as `/undo`).
+
+```
+Restored (2):
+  ~/project/src/app.ts
+  ~/project/src/utils.ts
+```
+
+If `/undo` has not been run yet, `/redo` reports "Nothing to redo."
+
+> **Note**: the redo buffer is per-session and in-memory only. It is not persisted to disk and is cleared when pi exits.
+
 ## Storage
 
 Snapshots are stored at:

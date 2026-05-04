@@ -1065,6 +1065,32 @@ export class AgentSession {
 	}
 
 	/**
+	 * Reapply all agent changes that were removed by the last undoFileChanges() call.
+	 * Returns null if there is nothing to redo.
+	 */
+	async redoFileChanges(): Promise<RestoreResult | null> {
+		return this._fileCheckpoint?.redo() ?? null;
+	}
+
+	/**
+	 * Reapply the agent's change for a single file that was previously undone.
+	 * Returns null if there is no redo state for this file.
+	 */
+	async redoFileChange(filePath: string): Promise<RestoreResult | null> {
+		return this._fileCheckpoint?.redoFile(filePath) ?? null;
+	}
+
+	/** True if a previous undo can be reapplied. */
+	get hasFileRedo(): boolean {
+		return this._fileCheckpoint?.hasRedo ?? false;
+	}
+
+	/** Absolute paths that have redo state available. */
+	getFileRedoPaths(): string[] {
+		return this._fileCheckpoint?.redoPaths ?? [];
+	}
+
+	/**
 	 * Returns the current file checkpoint status: lists of modified and newly
 	 * created files. Returns null if no changes have been tracked yet.
 	 */

@@ -71,6 +71,7 @@ mcpTools: [searxng_*, context7_*]
 
 - `/checkpoint` — показать список изменённых и созданных файлов
 - `/undo` — открывает интерактивный селектор: откатить **все** файлы сразу или выбрать конкретный
+- `/redo` — вернуть версию агента обратно после `/undo`
 
 Подробнее: [docs/file-checkpointing.md](packages/coding-agent/docs/file-checkpointing.md)
 

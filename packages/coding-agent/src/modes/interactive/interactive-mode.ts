@@ -2592,6 +2592,11 @@ export class InteractiveMode {
 				await this.handleUndoCommand();
 				return;
 			}
+			if (text === "/redo") {
+				this.editor.setText("");
+				await this.handleRedoCommand();
+				return;
+			}
 			if (text === "/checkpoint") {
 				this.editor.setText("");
 				this.handleCheckpointCommand();
@@ -5658,6 +5663,44 @@ export class InteractiveMode {
 		}
 		if (lines.length === 0) lines.push("Nothing changed.");
 		this.showStatus(lines.join("\n"));
+	}
+
+	private async handleRedoCommand(): Promise<void> {
+		if (this.session.isStreaming) {
+			this.showWarning("Wait for the current response to finish before redoing changes.");
+			return;
+		}
+		if (!this.session.hasFileRedo) {
+			this.showStatus("Nothing to redo — run /undo first.");
+			return;
+		}
+
+		const redoPaths = this.session.getFileRedoPaths();
+
+		if (redoPaths.length > 1) {
+			const allLabel = `All files (${redoPaths.length})`;
+			const choices: string[] = [allLabel, ...redoPaths.map((f) => `  ${this.shortPath(f)}`)];
+
+			const choice = await this.showExtensionSelectorAsync("Redo which files?", choices);
+			if (!choice) return;
+
+			if (choice === allLabel) {
+				const result = await this.session.redoFileChanges();
+				if (result) this._showUndoResult(result);
+			} else {
+				const rawPath = choice.trim();
+				const absPath = rawPath.startsWith("~") ? path.join(os.homedir(), rawPath.slice(1)) : rawPath;
+				const result = await this.session.redoFileChange(absPath);
+				if (!result) {
+					this.showWarning(`No redo state for: ${rawPath}`);
+					return;
+				}
+				this._showUndoResult(result);
+			}
+		} else {
+			const result = await this.session.redoFileChanges();
+			if (result) this._showUndoResult(result);
+		}
 	}
 
 	private handleCheckpointCommand(): void {

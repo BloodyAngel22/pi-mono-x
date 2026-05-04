@@ -23,6 +23,12 @@ export class FileCheckpoint {
 	private readonly _snapshotted = new Set<string>();
 	/** Absolute paths of new files created by the agent. */
 	private readonly _created = new Set<string>();
+	/**
+	 * Content captured just before the last undo, keyed by absolute path.
+	 * null = the file did not exist at undo time (was already deleted).
+	 * Used to implement redo.
+	 */
+	private _redoContent = new Map<string, string | null>();
 	private _initialized = false;
 
 	constructor(sessionId: string) {
@@ -58,9 +64,11 @@ export class FileCheckpoint {
 
 	/**
 	 * Restore all tracked files to their pre-session state.
-	 * Files snapshotted are written back; files marked as new are deleted.
+	 * Saves the current (agent) state to the redo buffer before restoring.
 	 */
 	async restore(): Promise<RestoreResult> {
+		await this._captureRedo([...this._snapshotted], [...this._created]);
+
 		const restored: string[] = [];
 		const deleted: string[] = [];
 		const errors: string[] = [];
@@ -90,8 +98,17 @@ export class FileCheckpoint {
 	}
 
 	/**
+	 * Reapply the agent's changes that were removed by the last `restore()` call.
+	 * Returns null if there is nothing to redo.
+	 */
+	async redo(): Promise<RestoreResult | null> {
+		if (this._redoContent.size === 0) return null;
+		return this._applyRedo([...this._redoContent.keys()]);
+	}
+
+	/**
 	 * Restore a single tracked file to its pre-session state.
-	 * Returns null if the path is not tracked.
+	 * Saves the current state to the redo buffer. Returns null if not tracked.
 	 */
 	async restoreFile(filePath: string): Promise<RestoreResult | null> {
 		const abs = resolve(filePath);
@@ -100,6 +117,7 @@ export class FileCheckpoint {
 		const errors: string[] = [];
 
 		if (this._snapshotted.has(abs)) {
+			await this._captureRedo([abs], []);
 			try {
 				const src = this._destForPath(abs);
 				const original = await readFile(src, "utf-8");
@@ -110,6 +128,7 @@ export class FileCheckpoint {
 				errors.push(`restore ${abs}: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		} else if (this._created.has(abs)) {
+			await this._captureRedo([], [abs]);
 			try {
 				await rm(abs, { force: true });
 				deleted.push(abs);
@@ -121,6 +140,16 @@ export class FileCheckpoint {
 		}
 
 		return { restored, deleted, errors };
+	}
+
+	/**
+	 * Redo a single file that was previously undone.
+	 * Returns null if there is no redo state for this file.
+	 */
+	async redoFile(filePath: string): Promise<RestoreResult | null> {
+		const abs = resolve(filePath);
+		if (!this._redoContent.has(abs)) return null;
+		return this._applyRedo([abs]);
 	}
 
 	/** Status summary of what has been tracked so far. */
@@ -136,9 +165,65 @@ export class FileCheckpoint {
 		return this._snapshotted.size > 0 || this._created.size > 0;
 	}
 
+	/** True if a previous undo can be reapplied. */
+	get hasRedo(): boolean {
+		return this._redoContent.size > 0;
+	}
+
+	/** Paths that have redo state available. */
+	get redoPaths(): string[] {
+		return [...this._redoContent.keys()];
+	}
+
 	// -------------------------------------------------------------------------
 	// Private helpers
 	// -------------------------------------------------------------------------
+
+	/** Read current file states into `_redoContent` before an undo operation. */
+	private async _captureRedo(modifiedPaths: string[], createdPaths: string[]): Promise<void> {
+		for (const abs of [...modifiedPaths, ...createdPaths]) {
+			try {
+				if (existsSync(abs)) {
+					this._redoContent.set(abs, await readFile(abs, "utf-8"));
+				} else {
+					this._redoContent.set(abs, null);
+				}
+			} catch {
+				this._redoContent.set(abs, null);
+			}
+		}
+	}
+
+	/** Apply redo for the given absolute paths and clear them from the buffer. */
+	private async _applyRedo(paths: string[]): Promise<RestoreResult> {
+		const restored: string[] = [];
+		const deleted: string[] = [];
+		const errors: string[] = [];
+
+		for (const abs of paths) {
+			const content = this._redoContent.get(abs);
+			this._redoContent.delete(abs);
+
+			if (content === null || content === undefined) {
+				try {
+					await rm(abs, { force: true });
+					deleted.push(abs);
+				} catch (err) {
+					errors.push(`delete ${abs}: ${err instanceof Error ? err.message : String(err)}`);
+				}
+			} else {
+				try {
+					await mkdir(dirname(abs), { recursive: true });
+					await writeFile(abs, content, "utf-8");
+					restored.push(abs);
+				} catch (err) {
+					errors.push(`redo ${abs}: ${err instanceof Error ? err.message : String(err)}`);
+				}
+			}
+		}
+
+		return { restored, deleted, errors };
+	}
 
 	private _ensureDir(): void {
 		if (this._initialized) return;
