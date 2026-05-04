@@ -481,6 +481,13 @@ export class InteractiveMode {
 				getArgumentCompletions: cmd.getArgumentCompletions,
 			}));
 
+		// Convert markdown commands to SlashCommand format for autocomplete
+		const markdownCommandList: SlashCommand[] = this.session.markdownCommands.map((cmd) => ({
+			name: cmd.name,
+			description: this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
+			...(cmd.argumentHint && { argumentHint: cmd.argumentHint }),
+		}));
+
 		// Build skill commands from session.skills (if enabled)
 		this.skillCommands.clear();
 		const skillCommandList: SlashCommand[] = [];
@@ -496,7 +503,7 @@ export class InteractiveMode {
 		}
 
 		return new CombinedAutocompleteProvider(
-			[...slashCommands, ...templateCommands, ...extensionCommands, ...skillCommandList],
+			[...slashCommands, ...templateCommands, ...extensionCommands, ...markdownCommandList, ...skillCommandList],
 			this.sessionManager.getCwd(),
 			this.fdPath,
 		);
