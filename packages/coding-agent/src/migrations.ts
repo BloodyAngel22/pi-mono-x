@@ -129,30 +129,6 @@ export function migrateSessionsFromAgentRoot(): void {
 	}
 }
 
-/**
- * Migrate commands/ to prompts/ if needed.
- * Works for both regular directories and symlinks.
- */
-function migrateCommandsToPrompts(baseDir: string, label: string): boolean {
-	const commandsDir = join(baseDir, "commands");
-	const promptsDir = join(baseDir, "prompts");
-
-	if (existsSync(commandsDir) && !existsSync(promptsDir)) {
-		try {
-			renameSync(commandsDir, promptsDir);
-			console.log(chalk.green(`Migrated ${label} commands/ → prompts/`));
-			return true;
-		} catch (err) {
-			console.log(
-				chalk.yellow(
-					`Warning: Could not migrate ${label} commands/ to prompts/: ${err instanceof Error ? err.message : err}`,
-				),
-			);
-		}
-	}
-	return false;
-}
-
 function migrateKeybindingsConfigFile(): void {
 	const configPath = join(getAgentDir(), "keybindings.json");
 	if (!existsSync(configPath)) return;
@@ -251,15 +227,11 @@ function checkDeprecatedExtensionDirs(baseDir: string, label: string): string[] 
 }
 
 /**
- * Run extension system migrations (commands→prompts) and collect warnings about deprecated directories.
+ * Collect warnings about deprecated directories.
  */
 function migrateExtensionSystem(cwd: string): string[] {
 	const agentDir = getAgentDir();
 	const projectDir = join(cwd, CONFIG_DIR_NAME);
-
-	// Migrate commands/ to prompts/
-	migrateCommandsToPrompts(agentDir, "Global");
-	migrateCommandsToPrompts(projectDir, "Project");
 
 	// Check for deprecated directories
 	const warnings = [

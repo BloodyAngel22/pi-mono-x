@@ -5,6 +5,8 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual, supportsXhigh } from "@mariozechner/pi-ai";
@@ -486,7 +488,8 @@ export async function main(args: string[], options?: MainOptions) {
 	const { migratedAuthProviders: migratedProviders, deprecationWarnings } = runMigrations(process.cwd());
 	time("runMigrations");
 
-	const cwd = process.cwd();
+	const rawCwd = process.cwd();
+	const cwd = existsSync(rawCwd) ? rawCwd : homedir();
 	const agentDir = getAgentDir();
 	const startupSettingsManager = SettingsManager.create(cwd, agentDir);
 	reportDiagnostics(collectSettingsDiagnostics(startupSettingsManager, "startup session lookup"));
