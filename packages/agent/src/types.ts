@@ -199,6 +199,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Default: "parallel"
 	 */
 	toolExecution?: ToolExecutionMode;
+	maxTurns?: number;
 
 	/**
 	 * Called before a tool is executed, after arguments have been validated.

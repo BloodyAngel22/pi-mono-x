@@ -70,6 +70,9 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.js";
 import { emitSessionShutdownEvent } from "./extensions/runner.js";
+import { FileCheckpoint, type RestoreResult } from "./file-checkpoint.js";
+import { type HookEventName, runHooks } from "./hooks.js";
+import { type MarkdownCommand, matchMarkdownCommand } from "./markdown-commands.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
 import { type PermissionAskCallback, PermissionsManager } from "./permissions.js";
@@ -279,6 +282,7 @@ export class AgentSession {
 	// Extension system
 	private _extensionRunner!: ExtensionRunner;
 	private _turnIndex = 0;
+	private _fileCheckpoint: FileCheckpoint | null = null;
 
 	private _resourceLoader: ResourceLoader;
 	private _customTools: ToolDefinition[];
@@ -751,13 +755,22 @@ export class AgentSession {
 		return undefined;
 	}
 
+	/** Run shell hooks for an event name, forwarding relevant data. */
+	private _runHooks(eventName: HookEventName, data: Record<string, unknown>): void {
+		const hooks = this._resourceLoader.getHooks().hooks;
+		// Fire-and-forget; errors are swallowed inside runHooks
+		void runHooks(hooks, eventName, data, { cwd: this._cwd, sessionId: this.sessionId });
+	}
+
 	/** Emit extension events based on agent events */
 	private async _emitExtensionEvent(event: AgentEvent): Promise<void> {
 		if (event.type === "agent_start") {
 			this._turnIndex = 0;
 			await this._extensionRunner.emit({ type: "agent_start" });
+			this._runHooks("agent_start", { type: "agent_start", cwd: this._cwd });
 		} else if (event.type === "agent_end") {
 			await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
+			this._runHooks("agent_end", { type: "agent_end", cwd: this._cwd, messageCount: event.messages.length });
 		} else if (event.type === "turn_start") {
 			const extensionEvent: TurnStartEvent = {
 				type: "turn_start",
@@ -765,6 +778,7 @@ export class AgentSession {
 				timestamp: Date.now(),
 			};
 			await this._extensionRunner.emit(extensionEvent);
+			this._runHooks("turn_start", { type: "turn_start", turnIndex: this._turnIndex });
 		} else if (event.type === "turn_end") {
 			const extensionEvent: TurnEndEvent = {
 				type: "turn_end",
@@ -773,6 +787,7 @@ export class AgentSession {
 				toolResults: event.toolResults,
 			};
 			await this._extensionRunner.emit(extensionEvent);
+			this._runHooks("turn_end", { type: "turn_end", turnIndex: this._turnIndex });
 			this._turnIndex++;
 		} else if (event.type === "message_start") {
 			const extensionEvent: MessageStartEvent = {
@@ -801,6 +816,20 @@ export class AgentSession {
 				args: event.args,
 			};
 			await this._extensionRunner.emit(extensionEvent);
+			this._runHooks("tool_execution_start", {
+				type: "tool_execution_start",
+				tool: event.toolName,
+				input: event.args,
+			});
+			if (event.toolName === "write" || event.toolName === "edit") {
+				const filePath = (event.args as Record<string, unknown>).path;
+				if (typeof filePath === "string") {
+					if (!this._fileCheckpoint) {
+						this._fileCheckpoint = new FileCheckpoint(this.sessionId);
+					}
+					void this._fileCheckpoint.snapshotBeforeWrite(filePath);
+				}
+			}
 		} else if (event.type === "tool_execution_update") {
 			const extensionEvent: ToolExecutionUpdateEvent = {
 				type: "tool_execution_update",
@@ -819,6 +848,11 @@ export class AgentSession {
 				isError: event.isError,
 			};
 			await this._extensionRunner.emit(extensionEvent);
+			this._runHooks("tool_execution_end", {
+				type: "tool_execution_end",
+				tool: event.toolName,
+				isError: event.isError,
+			});
 		}
 	}
 
@@ -1007,6 +1041,30 @@ export class AgentSession {
 		return this._resourceLoader.getPrompts().prompts;
 	}
 
+	/** Markdown slash commands loaded from commands/ directories */
+	get markdownCommands(): ReadonlyArray<MarkdownCommand> {
+		return this._resourceLoader.getCommands().commands;
+	}
+
+	/**
+	 * Restore all files written/edited by the agent in this session to their
+	 * pre-session state. Returns a summary of what was restored or deleted.
+	 * Returns null if no files were tracked (nothing to undo).
+	 */
+	async undoFileChanges(): Promise<RestoreResult | null> {
+		if (!this._fileCheckpoint?.hasChanges) return null;
+		return this._fileCheckpoint.restore();
+	}
+
+	/**
+	 * Returns the current file checkpoint status: lists of modified and newly
+	 * created files. Returns null if no changes have been tracked yet.
+	 */
+	getFileCheckpointStatus(): { modified: string[]; created: string[] } | null {
+		if (!this._fileCheckpoint?.hasChanges) return null;
+		return this._fileCheckpoint.getStatus();
+	}
+
 	private _normalizePromptSnippet(text: string | undefined): string | undefined {
 		if (!text) return undefined;
 		const oneLine = text
@@ -1084,6 +1142,7 @@ export class AgentSession {
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
 		let messages: AgentMessage[] | undefined;
+		let markdownCommandMatch: ReturnType<typeof matchMarkdownCommand> | null = null;
 
 		try {
 			// Handle extension commands first (execute immediately, even during streaming)
@@ -1116,11 +1175,19 @@ export class AgentSession {
 				}
 			}
 
+			// Check for markdown commands (/command args) — must come before prompt template expansion
+			markdownCommandMatch =
+				expandPromptTemplates && currentText.startsWith("/")
+					? matchMarkdownCommand(currentText, this._resourceLoader.getCommands().commands)
+					: null;
+
 			// Expand skill commands (/skill:name args) and prompt templates (/template args)
 			let expandedText = currentText;
-			if (expandPromptTemplates) {
+			if (expandPromptTemplates && !markdownCommandMatch) {
 				expandedText = this._expandSkillCommand(expandedText);
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+			} else if (markdownCommandMatch) {
+				expandedText = markdownCommandMatch.expandedText;
 			}
 
 			// If streaming, queue via steer() or followUp() based on option
@@ -1223,7 +1290,31 @@ export class AgentSession {
 		}
 
 		preflightResult?.(true);
-		await this.agent.prompt(messages);
+
+		// Apply markdown command overrides (tools + model) for the duration of this prompt
+		const savedToolNames = markdownCommandMatch ? this.getActiveToolNames() : undefined;
+		const savedModel = markdownCommandMatch ? this.agent.state.model : undefined;
+		if (markdownCommandMatch?.command.allowedTools) {
+			this.setActiveToolsByName(markdownCommandMatch.command.allowedTools);
+		}
+		if (markdownCommandMatch?.command.model) {
+			const targetModel = this._modelRegistry.getAll().find((m) => m.id === markdownCommandMatch.command.model);
+			if (targetModel) {
+				this.agent.state.model = targetModel;
+			}
+		}
+
+		try {
+			await this.agent.prompt(messages);
+		} finally {
+			if (savedToolNames !== undefined) {
+				this.setActiveToolsByName(savedToolNames);
+			}
+			if (savedModel !== undefined) {
+				this.agent.state.model = savedModel;
+			}
+		}
+
 		await this.waitForRetry();
 	}
 

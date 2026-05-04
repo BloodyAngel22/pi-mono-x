@@ -161,6 +161,7 @@ async function runLoop(
 	streamFn?: StreamFn,
 ): Promise<void> {
 	let firstTurn = true;
+	let completedTurns = 0;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -214,12 +215,23 @@ async function runLoop(
 			}
 
 			await emit({ type: "turn_end", message, toolResults });
+			completedTurns++;
 
 			pendingMessages = (await config.getSteeringMessages?.()) || [];
+			if (
+				config.maxTurns !== undefined &&
+				completedTurns >= config.maxTurns &&
+				(hasMoreToolCalls || pendingMessages.length > 0)
+			) {
+				throw new Error(`Maximum turn limit reached (${config.maxTurns}).`);
+			}
 		}
 
 		// Agent would stop here. Check for follow-up messages.
 		const followUpMessages = (await config.getFollowUpMessages?.()) || [];
+		if (config.maxTurns !== undefined && completedTurns >= config.maxTurns && followUpMessages.length > 0) {
+			throw new Error(`Maximum turn limit reached (${config.maxTurns}).`);
+		}
 		if (followUpMessages.length > 0) {
 			// Set as pending so inner loop processes them
 			pendingMessages = followUpMessages;

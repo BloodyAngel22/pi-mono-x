@@ -2579,6 +2579,16 @@ export class InteractiveMode {
 				await this.handleExecuteCommand();
 				return;
 			}
+			if (text === "/undo") {
+				this.editor.setText("");
+				await this.handleUndoCommand();
+				return;
+			}
+			if (text === "/checkpoint") {
+				this.editor.setText("");
+				this.handleCheckpointCommand();
+				return;
+			}
 
 			// Handle bash command (! for normal, !! for excluded from context)
 			if (text.startsWith("!")) {
@@ -5576,6 +5586,61 @@ export class InteractiveMode {
 				this.showError(error instanceof Error ? error.message : String(error));
 			}
 		}
+	}
+
+	// =========================================================================
+	// Checkpoint / undo commands
+	// =========================================================================
+
+	private async handleUndoCommand(): Promise<void> {
+		if (this.session.isStreaming) {
+			this.showWarning("Wait for the current response to finish before undoing changes.");
+			return;
+		}
+		const status = this.session.getFileCheckpointStatus();
+		if (!status) {
+			this.showStatus("Nothing to undo — no file changes tracked in this session.");
+			return;
+		}
+		const total = status.modified.length + status.created.length;
+		const lines: string[] = [`Undoing ${total} file change${total === 1 ? "" : "s"}...`];
+		const result = await this.session.undoFileChanges();
+		if (!result) {
+			this.showStatus("Nothing to undo.");
+			return;
+		}
+		if (result.restored.length > 0) {
+			lines.push(`Restored (${result.restored.length}):`);
+			for (const f of result.restored) lines.push(`  ${this.shortPath(f)}`);
+		}
+		if (result.deleted.length > 0) {
+			lines.push(`Deleted (${result.deleted.length}):`);
+			for (const f of result.deleted) lines.push(`  ${this.shortPath(f)}`);
+		}
+		if (result.errors.length > 0) {
+			lines.push(`Errors (${result.errors.length}):`);
+			for (const e of result.errors) lines.push(`  ${e}`);
+		}
+		this.showStatus(lines.join("\n"));
+	}
+
+	private handleCheckpointCommand(): void {
+		const status = this.session.getFileCheckpointStatus();
+		if (!status) {
+			this.showStatus("No file changes tracked in this session yet.");
+			return;
+		}
+		const lines: string[] = [];
+		if (status.modified.length > 0) {
+			lines.push(`Modified (${status.modified.length}):`);
+			for (const f of status.modified) lines.push(`  ${this.shortPath(f)}`);
+		}
+		if (status.created.length > 0) {
+			lines.push(`Created (${status.created.length}):`);
+			for (const f of status.created) lines.push(`  ${this.shortPath(f)}`);
+		}
+		lines.push("\nUse /undo to revert all these changes.");
+		this.showStatus(lines.join("\n"));
 	}
 
 	// =========================================================================

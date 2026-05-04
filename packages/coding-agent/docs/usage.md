@@ -51,6 +51,8 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/export [file]` | Export session to HTML |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
 | `/reload` | Reload keybindings, extensions, skills, prompts, and context files |
+| `/checkpoint` | Show files modified/created by the agent in this session |
+| `/undo` | Revert all agent file changes back to their pre-session state |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
 | `/quit` | Quit pi |
@@ -176,6 +178,7 @@ cat README.md | pi -p "Summarize this text"
 | `--fork <path\|id>` | Fork a session file or partial UUID into a new session |
 | `--session-dir <dir>` | Custom session storage directory |
 | `--no-session` | Ephemeral mode; do not save |
+| `--max-turns [n]` | Limit agent turns per prompt; defaults to 10 if no number given. Useful in CI/headless mode to prevent runaway sessions. |
 
 ### Tool Options
 
@@ -253,6 +256,9 @@ pi --models "claude-*,gpt-4o"
 
 # Read-only mode
 pi --tools read,grep,find,ls -p "Review the code"
+
+# CI / headless mode with turn limit
+pi -p --max-turns 5 --no-session "Run the tests and fix any failures"
 ```
 
 ### Environment Variables

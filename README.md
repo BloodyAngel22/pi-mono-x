@@ -65,6 +65,37 @@ mcpTools: [searxng_*, context7_*]
 
 Подробнее: [docs/subagents.md](packages/coding-agent/docs/subagents.md)
 
+### File Checkpointing
+
+До того как агент изменяет файл (`write` / `edit`), оригинал автоматически копируется в `/tmp/.pi/checkpoints/<session-id>/`. В любой момент можно откатить все изменения:
+
+- `/checkpoint` — показать список изменённых и созданных файлов
+- `/undo` — вернуть все файлы в состояние до начала сессии
+
+Подробнее: [docs/file-checkpointing.md](packages/coding-agent/docs/file-checkpointing.md)
+
+### Markdown Commands
+
+Slash-команды как `.md`-файлы без TypeScript. Кладёте файл в `~/.pi/agent/commands/` или `.pi/commands/`, вызываете `/имя [args]`. Опциональный frontmatter позволяет ограничить набор инструментов (`allowed-tools`) и временно переключить модель (`model`) на время этой команды.
+
+Подробнее: [docs/markdown-commands.md](packages/coding-agent/docs/markdown-commands.md)
+
+### Shell Hooks
+
+Исполняемые скрипты, срабатывающие на события агента (`agent_start`, `agent_end`, `turn_start`, `turn_end`, `tool_execution_start`, `tool_execution_end`). Кладёте скрипт с именем события в `~/.pi/agent/hooks/` или `.pi/hooks/`. Данные приходят в stdin как JSON + через env vars `PI_EVENT`, `PI_CWD`, `PI_SESSION_ID`.
+
+Подробнее: [docs/hooks.md](packages/coding-agent/docs/hooks.md)
+
+### Флаг `--max-turns`
+
+Ограничивает количество итераций агента за один промпт. Удобно в CI/headless-режиме:
+
+```bash
+pi -p --max-turns 5 --no-session "Запусти тесты и исправь упавшие"
+```
+
+Без числа — дефолт 10.
+
 ### Новые slash-команды
 
 | Команда | Описание |
@@ -128,7 +159,11 @@ export ANTHROPIC_API_KEY="sk-..."
 | **[MCP-серверы](docs/mcp.md)** | Подключение context7, searxng, ddg-search, serena и других |
 | **[Темы](docs/themes.md)** | Создание кастомных цветовых тем |
 | **[Суб-агенты](packages/coding-agent/docs/subagents.md)** | Система делегирования задач и кастомные агенты |
+| **[File Checkpointing](packages/coding-agent/docs/file-checkpointing.md)** | Автоматические снапшоты файлов + `/undo` и `/checkpoint` |
+| **[Markdown Commands](packages/coding-agent/docs/markdown-commands.md)** | Slash-команды из `.md`-файлов с опциональным ограничением инструментов и модели |
+| **[Shell Hooks](packages/coding-agent/docs/hooks.md)** | Shell-скрипты на события агента (`agent_end`, `turn_end` и др.) |
 | **[Провайдеры](packages/coding-agent/docs/providers.md)** | Настройка API-ключей и провайдеров |
+| **[CLI Reference](packages/coding-agent/docs/usage.md)** | Все CLI-флаги включая `--max-turns` |
 
 ## Разработка
 

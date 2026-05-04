@@ -77,6 +77,8 @@ export interface CreateAgentSessionOptions {
 	settingsManager?: SettingsManager;
 	/** Session start event metadata for extension runtime startup. */
 	sessionStartEvent?: SessionStartEvent;
+	/** Optional cap for agent loop turns per prompt. */
+	maxTurns?: number;
 }
 
 /** Result from createAgentSession */
@@ -366,6 +368,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		transport: settingsManager.getTransport(),
 		thinkingBudgets: settingsManager.getThinkingBudgets(),
 		maxRetryDelayMs: settingsManager.getProviderRetrySettings().maxRetryDelayMs,
+		maxTurns: options.maxTurns,
 	});
 
 	// Restore messages if session has existing data

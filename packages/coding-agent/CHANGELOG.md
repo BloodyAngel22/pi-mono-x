@@ -4,6 +4,10 @@
 
 ### Added
 
+- Added `--max-turns <n>` flag to limit the number of agent loop turns per prompt. Useful in CI/headless automation to prevent runaway sessions.
+- Added Markdown Commands: define slash commands as `.md` files with optional frontmatter `allowed-tools` and `model` overrides. Place files in `~/.pi/agent/commands/` (global) or `.pi/commands/` (project). Project commands override global ones with the same name.
+- Added File Checkpointing: before each `write` or `edit` tool call, pi snapshots the original file in a temp directory. Use `/undo` to revert all agent file changes in the current session, or `/checkpoint` to see what has been modified/created.
+- Added Shell Hooks: place executable scripts named after agent events (`agent_start.sh`, `agent_end.sh`, `turn_start.sh`, `turn_end.sh`, `tool_execution_start.sh`, `tool_execution_end.sh`) in `~/.pi/agent/hooks/` (global) or `.pi/hooks/` (project). Scripts receive JSON event data on stdin and key fields via `PI_EVENT`, `PI_CWD`, and `PI_SESSION_ID` env vars. Global and project hooks both run (global first). Hooks time out after 30 s.
 - Added sub-agent system: `task` tool delegates work to isolated agent sessions with fresh context windows, saving tokens and enabling parallel execution. Includes custom agent definitions (`.pi/agents/`), MCP tool pass-through, `/tasks` and `/agents` commands, and `SubagentManager` SDK export.
 - Added top-level `name` support to `pi.registerProvider()` so extension-registered providers can show a friendly name in `/login` ([#3956](https://github.com/badlogic/pi-mono/issues/3956)).
 - Added `ctx.ui.getEditorComponent()` so extensions can wrap the currently configured custom editor factory ([#3935](https://github.com/badlogic/pi-mono/issues/3935)).

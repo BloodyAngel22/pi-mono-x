@@ -46,4 +46,6 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Enter planning mode (agent writes a plan, no code execution). Example: /plan refactor auth",
 	},
 	{ name: "execute", description: "Exit planning mode and execute the current plan" },
+	{ name: "undo", description: "Revert all file changes made by the agent in this session" },
+	{ name: "checkpoint", description: "Show files modified/created by the agent in this session" },
 ];

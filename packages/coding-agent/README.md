@@ -60,6 +60,8 @@ I regularly publish my own `pi-mono` work sessions here:
 - [Context Files](#context-files)
 - [Customization](#customization)
   - [Prompt Templates](#prompt-templates)
+  - [Markdown Commands](#markdown-commands)
+  - [Shell Hooks](#shell-hooks)
   - [Skills](#skills)
   - [Extensions](#extensions)
   - [Themes](#themes)
@@ -319,6 +321,57 @@ Focus on: {{focus}}
 
 Place in `~/.pi/agent/prompts/`, `.pi/prompts/`, or a [pi package](#pi-packages) to share with others. See [docs/prompt-templates.md](docs/prompt-templates.md).
 
+### Markdown Commands
+
+Slash commands defined as Markdown files with optional tool and model overrides. Type `/name [args]` to invoke.
+
+```markdown
+<!-- ~/.pi/agent/commands/security.md -->
+---
+description: Check code for security issues
+argument-hint: [area]
+allowed-tools: read,grep,find,ls
+model: claude-opus-4
+---
+
+Review the code for security vulnerabilities. Focus on: $ARGUMENTS
+```
+
+Frontmatter fields:
+
+| Field | Description |
+|-------|-------------|
+| `description` | Short description shown in command listings |
+| `argument-hint` | Usage hint shown after the command name |
+| `allowed-tools` | Comma-separated tool names to restrict during this command |
+| `model` | Model id to use for this command (restored after the turn) |
+
+Argument substitution follows the same rules as [Prompt Templates](#prompt-templates): `$1`, `$2`, `$@`, `$ARGUMENTS`.
+
+Place files in `~/.pi/agent/commands/` (global) or `.pi/commands/` (project). Project commands override global ones with the same name.
+
+### Shell Hooks
+
+Run shell scripts in response to agent lifecycle events. Name the script after the event and place it in a hooks directory.
+
+**Supported events:** `agent_start`, `agent_end`, `turn_start`, `turn_end`, `tool_execution_start`, `tool_execution_end`
+
+```bash
+# ~/.pi/agent/hooks/agent_end.sh
+#!/usr/bin/env bash
+# Commit all changes after the agent finishes
+cd "$PI_CWD"
+git add -A && git commit -m "checkpoint [pi]" --allow-empty
+```
+
+Each script receives:
+- **stdin** — JSON object with event-specific fields
+- **`PI_EVENT`** — event name
+- **`PI_CWD`** — current working directory
+- **`PI_SESSION_ID`** — current session id
+
+Scripts must be executable (`chmod +x`). Place in `~/.pi/agent/hooks/` (global) or `.pi/hooks/` (project). Both directories run for matching events (global first). Hooks time out after 30 s and errors are silently ignored.
+
 ### Skills
 
 On-demand capability packages following the [Agent Skills standard](https://agentskills.io). Invoke via `/skill:name` or let the agent load them automatically.
@@ -538,6 +591,7 @@ cat README.md | pi -p "Summarize this text"
 | `--fork <path\|id>` | Fork specific session file or partial UUID into a new session |
 | `--session-dir <dir>` | Custom session storage directory |
 | `--no-session` | Ephemeral mode (don't save) |
+| `--max-turns [n]` | Limit agent turns per prompt; defaults to 10 if no number given (useful in CI/headless mode) |
 
 ### Tool Options
 

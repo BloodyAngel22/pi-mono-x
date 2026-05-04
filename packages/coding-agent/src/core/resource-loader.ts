@@ -17,6 +17,10 @@ import {
 	loadExtensions,
 } from "./extensions/loader.js";
 import type { Extension, ExtensionFactory, ExtensionRuntime, LoadExtensionsResult } from "./extensions/types.js";
+import type { HookDefinition } from "./hooks.js";
+import { loadHooks } from "./hooks.js";
+import type { MarkdownCommand } from "./markdown-commands.js";
+import { loadMarkdownCommands } from "./markdown-commands.js";
 import { DefaultPackageManager, type PathMetadata } from "./package-manager.js";
 import type { PromptTemplate } from "./prompt-templates.js";
 import { loadPromptTemplates } from "./prompt-templates.js";
@@ -35,6 +39,8 @@ export interface ResourceLoader {
 	getExtensions(): LoadExtensionsResult;
 	getSkills(): { skills: Skill[]; diagnostics: ResourceDiagnostic[] };
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] };
+	getCommands(): { commands: MarkdownCommand[] };
+	getHooks(): { hooks: HookDefinition[] };
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] };
 	getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
 	getSystemPrompt(): string | undefined;
@@ -197,6 +203,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private skillDiagnostics: ResourceDiagnostic[];
 	private prompts: PromptTemplate[];
 	private promptDiagnostics: ResourceDiagnostic[];
+	private markdownCommands: MarkdownCommand[];
+	private hookDefinitions: HookDefinition[];
 	private themes: Theme[];
 	private themeDiagnostics: ResourceDiagnostic[];
 	private agentsFiles: Array<{ path: string; content: string }>;
@@ -244,6 +252,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.skillDiagnostics = [];
 		this.prompts = [];
 		this.promptDiagnostics = [];
+		this.markdownCommands = [];
+		this.hookDefinitions = [];
 		this.themes = [];
 		this.themeDiagnostics = [];
 		this.agentsFiles = [];
@@ -266,6 +276,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	getPrompts(): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] } {
 		return { prompts: this.prompts, diagnostics: this.promptDiagnostics };
+	}
+
+	getCommands(): { commands: MarkdownCommand[] } {
+		return { commands: this.markdownCommands };
+	}
+
+	getHooks(): { hooks: HookDefinition[] } {
+		return { hooks: this.hookDefinitions };
 	}
 
 	getThemes(): { themes: Theme[]; diagnostics: ResourceDiagnostic[] } {
@@ -457,6 +475,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 				this.themeDiagnostics.push({ type: "error", message: "Theme path does not exist", path: p });
 			}
 		}
+
+		this.markdownCommands = loadMarkdownCommands({ cwd: this.cwd, agentDir: this.agentDir });
+		this.hookDefinitions = loadHooks({ cwd: this.cwd, agentDir: this.agentDir });
 
 		const agentsFiles = {
 			agentsFiles: this.noContextFiles ? [] : loadProjectContextFiles({ cwd: this.cwd, agentDir: this.agentDir }),

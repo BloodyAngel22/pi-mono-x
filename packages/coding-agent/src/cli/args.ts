@@ -43,6 +43,7 @@ export interface Args {
 	listModels?: string | true;
 	offline?: boolean;
 	verbose?: boolean;
+	maxTurns?: number;
 	messages: string[];
 	fileArgs: string[];
 	/** Unknown flags (potentially extension flags) - map of flag name to value */
@@ -157,6 +158,19 @@ export function parseArgs(args: string[]): Args {
 			result.verbose = true;
 		} else if (arg === "--offline") {
 			result.offline = true;
+		} else if (arg === "--max-turns") {
+			const DEFAULT_MAX_TURNS = 10;
+			const next = args[i + 1];
+			if (next !== undefined && !next.startsWith("-") && !next.startsWith("@")) {
+				const value = Number(args[++i]);
+				if (Number.isInteger(value) && value > 0) {
+					result.maxTurns = value;
+				} else {
+					result.diagnostics.push({ type: "error", message: "--max-turns requires a positive integer" });
+				}
+			} else {
+				result.maxTurns = DEFAULT_MAX_TURNS;
+			}
 		} else if (arg.startsWith("@")) {
 			result.fileArgs.push(arg.slice(1)); // Remove @ prefix
 		} else if (arg.startsWith("--")) {
@@ -240,6 +254,7 @@ ${chalk.bold("Options:")}
   --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
+  --max-turns [number]           Limit agent turns for each prompt (default: 10 if no number given)
   --verbose                      Force verbose startup (overrides quietStartup setting)
   --offline                      Disable startup network operations (same as PI_OFFLINE=1)
   --help, -h                     Show this help
