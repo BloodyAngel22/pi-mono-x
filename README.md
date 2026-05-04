@@ -67,10 +67,10 @@ mcpTools: [searxng_*, context7_*]
 
 ### File Checkpointing
 
-До того как агент изменяет файл (`write` / `edit`), оригинал автоматически копируется в `/tmp/.pi/checkpoints/<session-id>/`. В любой момент можно откатить все изменения:
+До того как агент изменяет файл (`write` / `edit`), оригинал автоматически копируется в `/tmp/.pi/checkpoints/<session-id>/`. В любой момент:
 
 - `/checkpoint` — показать список изменённых и созданных файлов
-- `/undo` — вернуть все файлы в состояние до начала сессии
+- `/undo` — открывает интерактивный селектор: откатить **все** файлы сразу или выбрать конкретный
 
 Подробнее: [docs/file-checkpointing.md](packages/coding-agent/docs/file-checkpointing.md)
 

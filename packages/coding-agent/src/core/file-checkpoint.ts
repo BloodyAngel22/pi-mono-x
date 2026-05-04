@@ -89,6 +89,40 @@ export class FileCheckpoint {
 		return { restored, deleted, errors };
 	}
 
+	/**
+	 * Restore a single tracked file to its pre-session state.
+	 * Returns null if the path is not tracked.
+	 */
+	async restoreFile(filePath: string): Promise<RestoreResult | null> {
+		const abs = resolve(filePath);
+		const restored: string[] = [];
+		const deleted: string[] = [];
+		const errors: string[] = [];
+
+		if (this._snapshotted.has(abs)) {
+			try {
+				const src = this._destForPath(abs);
+				const original = await readFile(src, "utf-8");
+				await mkdir(dirname(abs), { recursive: true });
+				await writeFile(abs, original, "utf-8");
+				restored.push(abs);
+			} catch (err) {
+				errors.push(`restore ${abs}: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		} else if (this._created.has(abs)) {
+			try {
+				await rm(abs, { force: true });
+				deleted.push(abs);
+			} catch (err) {
+				errors.push(`delete ${abs}: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		} else {
+			return null;
+		}
+
+		return { restored, deleted, errors };
+	}
+
 	/** Status summary of what has been tracked so far. */
 	getStatus(): { modified: string[]; created: string[] } {
 		return {

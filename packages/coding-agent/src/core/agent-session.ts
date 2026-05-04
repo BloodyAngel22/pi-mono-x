@@ -1057,6 +1057,14 @@ export class AgentSession {
 	}
 
 	/**
+	 * Restore a single tracked file to its pre-session state.
+	 * Returns null if the file is not tracked.
+	 */
+	async undoFileChange(filePath: string): Promise<RestoreResult | null> {
+		return this._fileCheckpoint?.restoreFile(filePath) ?? null;
+	}
+
+	/**
 	 * Returns the current file checkpoint status: lists of modified and newly
 	 * created files. Returns null if no changes have been tracked yet.
 	 */

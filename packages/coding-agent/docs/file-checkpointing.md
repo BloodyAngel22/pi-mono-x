@@ -28,10 +28,21 @@ Use /undo to revert all these changes.
 
 ### `/undo`
 
-Restores all tracked files to their original state and deletes any new files created by the agent:
+Opens an interactive selector showing all tracked files. Choose a specific file or restore everything at once:
 
 ```
-Undoing 3 file changes...
+Undo which files?
+▶ All files (3)
+    modified  ~/project/src/app.ts
+    modified  ~/project/src/utils.ts
+    created   ~/project/src/new-feature.ts
+```
+
+Select **All files** to revert everything, or pick one entry to restore just that file.
+
+After confirming:
+
+```
 Restored (2):
   ~/project/src/app.ts
   ~/project/src/utils.ts

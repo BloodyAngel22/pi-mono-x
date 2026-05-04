@@ -67,6 +67,7 @@ import type {
 	ExtensionUIDialogOptions,
 	ExtensionWidgetOptions,
 } from "../../core/extensions/index.js";
+import type { RestoreResult } from "../../core/file-checkpoint.js";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.js";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.js";
 import { createCompactionSummaryMessage } from "../../core/messages.js";
@@ -5602,13 +5603,40 @@ export class InteractiveMode {
 			this.showStatus("Nothing to undo — no file changes tracked in this session.");
 			return;
 		}
+
 		const total = status.modified.length + status.created.length;
-		const lines: string[] = [`Undoing ${total} file change${total === 1 ? "" : "s"}...`];
-		const result = await this.session.undoFileChanges();
-		if (!result) {
-			this.showStatus("Nothing to undo.");
-			return;
+		const allLabel = `All files (${total})`;
+
+		const choices: string[] = [allLabel];
+		for (const f of status.modified) choices.push(`  modified  ${this.shortPath(f)}`);
+		for (const f of status.created) choices.push(`  created   ${this.shortPath(f)}`);
+
+		const choice = await this.showExtensionSelectorAsync("Undo which files?", choices);
+		if (!choice) return;
+
+		if (choice === allLabel) {
+			const result = await this.session.undoFileChanges();
+			if (!result) {
+				this.showStatus("Nothing to undo.");
+				return;
+			}
+			this._showUndoResult(result);
+		} else {
+			// Extract the absolute path from the choice label (trim leading spaces and tag)
+			const rawPath = choice.replace(/^\s+(modified|created)\s+/, "").trim();
+			// Resolve back to absolute path if shortPath replaced home with ~
+			const absPath = rawPath.startsWith("~") ? path.join(os.homedir(), rawPath.slice(1)) : rawPath;
+			const result = await this.session.undoFileChange(absPath);
+			if (!result) {
+				this.showWarning(`File not tracked: ${rawPath}`);
+				return;
+			}
+			this._showUndoResult(result);
 		}
+	}
+
+	private _showUndoResult(result: RestoreResult): void {
+		const lines: string[] = [];
 		if (result.restored.length > 0) {
 			lines.push(`Restored (${result.restored.length}):`);
 			for (const f of result.restored) lines.push(`  ${this.shortPath(f)}`);
@@ -5621,6 +5649,7 @@ export class InteractiveMode {
 			lines.push(`Errors (${result.errors.length}):`);
 			for (const e of result.errors) lines.push(`  ${e}`);
 		}
+		if (lines.length === 0) lines.push("Nothing changed.");
 		this.showStatus(lines.join("\n"));
 	}
 
