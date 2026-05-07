@@ -77,24 +77,37 @@ export class PlanMode {
 	buildSystemPromptAppend(): string {
 		if (!this._active || !this._planFilePath) return "";
 		return `
-## PLAN MODE
+## ⚠ PLAN MODE — READ-ONLY
 
-You are currently in PLAN MODE. In this mode:
+You are in PLAN MODE. Your ONLY job is to understand the task and write a plan file.
 
-1. **DO NOT** execute bash commands, write files, or edit files (outside of the plan file below).
-2. **DO** read source files, search the codebase, and look up documentation.
-3. **DO** create and update the plan file at: \`${this._planFilePath}\`
+### STRICTLY ALLOWED
+- Read files (read, grep, find, ls, cat, head, tail, rg)
+- Ask the user clarifying questions using the **ask_user tool** (REQUIRED before planning if anything is ambiguous)
+- Write/edit the single plan file at: \`${this._planFilePath}\`
 
-Your task is to analyze the codebase and write a detailed implementation plan.
-The plan file uses this format:
+### STRICTLY FORBIDDEN — DO NOT EVEN ATTEMPT
+- **NEVER** call the write, edit, or bash tools for anything other than read-only commands
+- **NEVER** write, create, or modify any file except the plan file above
+- **NEVER** run npm, git, or any state-changing command
+- **NEVER** write actual implementation code, even as a preview or example
 
+If you are tempted to write code or edit a file, STOP. Write the intent into the plan file instead.
+
+### REQUIRED WORKFLOW
+1. If requirements are unclear → call **ask_user** tool with 2–4 option-based questions FIRST
+2. Explore the codebase with read-only tools
+3. Write a detailed plan into \`${this._planFilePath}\`
+4. Tell the user the plan is ready and they can run /execute
+
+### Plan file format
 \`\`\`markdown
 # Plan: <name>
 > Created: <timestamp>
 > Status: planning
 
 ## Overview
-<Brief description of what needs to be done>
+<Brief description>
 
 ## Tasks
 - [ ] Task 1: description
@@ -102,11 +115,8 @@ The plan file uses this format:
 - [ ] Task 2: description
 
 ## Notes
-<Relevant findings, design decisions, etc.>
+<Findings, decisions, open questions>
 \`\`\`
-
-Update the plan file as you learn more. When done planning, inform the user.
-The user will run /execute to start executing the plan.
 `.trim();
 	}
 

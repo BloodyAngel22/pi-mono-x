@@ -122,9 +122,29 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		}
 	}
 
-	// Always include these
+	// Always include these — order matters, higher = higher priority
+	addGuideline(
+		"When you want to ask the user a question: ALWAYS use the ask_user tool — never write a numbered/bulleted list of questions in plain text. " +
+			"The ask_user tool shows a structured UI with selectable options. Use it every time you need input from the user.",
+	);
+	addGuideline(
+		"For non-trivial tasks (new features, refactoring, architecture changes): call ask_user with 2–4 option-based questions BEFORE writing any code. " +
+			"Do not start implementing until the requirements are clear.",
+	);
+	addGuideline(
+		"Before writing code, briefly outline your plan in 2–4 bullet points so the user can see the approach. " +
+			"Proceed without waiting unless the approach is non-obvious or risky.",
+	);
 	addGuideline("Be concise in your responses");
 	addGuideline("Show file paths clearly when working with files");
+	addGuideline("Before implementing, read relevant source files and verify current library APIs with read/grep tools");
+	addGuideline("Use parallel sub-agents to research different topics simultaneously when needed");
+	addGuideline(
+		"Never assume library APIs, function signatures, or file structure — verify with read/grep/bash before writing code",
+	);
+	addGuideline(
+		"Work in small verifiable steps: implement one piece at a time and confirm it compiles/tests before moving on",
+	);
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
 

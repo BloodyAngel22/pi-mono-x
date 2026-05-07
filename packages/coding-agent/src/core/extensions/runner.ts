@@ -191,6 +191,7 @@ const noOpUIContext: ExtensionUIContext = {
 	input: async () => undefined,
 	notify: () => {},
 	onTerminalInput: () => () => {},
+	requestRender: () => {},
 	setStatus: () => {},
 	setWorkingMessage: () => {},
 	setWorkingVisible: () => {},

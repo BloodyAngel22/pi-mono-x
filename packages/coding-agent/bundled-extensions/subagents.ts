@@ -115,31 +115,60 @@ export default function (pi: ExtensionAPI): void {
 
 		manager = new SubagentManager(sessionFactory);
 
+		// Live-update ticker: refreshes elapsed times every second while tasks are running
+		let liveTickTimer: NodeJS.Timeout | null = null;
+
+		const formatSubagentStatus = (): string => {
+			const tasks = manager?.getRecentTasks(10_000) ?? [];
+			if (tasks.length === 0) return "";
+			return tasks
+				.map((t) => {
+					const elapsed = Math.floor(((t.completedAt ?? Date.now()) - t.startedAt) / 1000);
+					const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m${elapsed % 60}s`;
+					const dot =
+						t.status === "done" ? "\u25cf done" : t.status === "error" ? "\u25cf err" : "\u25cf";
+					return `${dot} ${t.label} (${elapsedStr})`;
+				})
+				.join("  ");
+		};
+
+		const startLiveTick = (ui: any) => {
+			if (liveTickTimer) return;
+			liveTickTimer = setInterval(() => {
+				if (!currentCtx?.hasUI) return;
+				const active = manager?.getActiveTasks() ?? [];
+				if (active.length === 0) {
+					clearInterval(liveTickTimer!);
+					liveTickTimer = null;
+					return;
+				}
+				ui.setStatus("subagent", formatSubagentStatus());
+			}, 1000);
+		};
+
 		manager.onEvent((event) => {
 			if (!currentCtx?.hasUI) return;
 			const ui = currentCtx.ui;
 
 			switch (event.type) {
 				case "task_start":
-					ui.setStatus("subagent", `[task] ${event.task.label}`);
+					ui.setStatus("subagent", formatSubagentStatus());
+					startLiveTick(ui);
 					break;
 				case "task_complete": {
-					const saved = event.task.savedTokens;
-					const savedStr = saved > 1000 ? `${(saved / 1000).toFixed(1)}k` : String(saved);
-					ui.setStatus("subagent", `[done] ${event.task.label} (saved ~${savedStr} tokens)`);
+					ui.setStatus("subagent", formatSubagentStatus());
 					setTimeout(() => {
 						const active = manager?.getActiveTasks() ?? [];
 						if (active.length === 0) {
 							ui.setStatus("subagent", "");
 						} else {
-							const labels = active.map((t) => `[task] ${t.label}`).join(" | ");
-							ui.setStatus("subagent", labels);
+							ui.setStatus("subagent", formatSubagentStatus());
 						}
 					}, 5000);
 					break;
 				}
 				case "task_error":
-					ui.setStatus("subagent", `[error] ${event.error}`);
+					ui.setStatus("subagent", formatSubagentStatus());
 					ui.notify(`Sub-agent error: ${event.error}`, "error");
 					setTimeout(() => {
 						const active = manager?.getActiveTasks() ?? [];

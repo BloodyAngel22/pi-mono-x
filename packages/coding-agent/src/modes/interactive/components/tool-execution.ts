@@ -1,6 +1,6 @@
 import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@mariozechner/pi-tui";
 import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.js";
-import { allToolNames, createAllToolDefinitions, type ToolName } from "../../../core/tools/index.js";
+import { createAllToolDefinitions, type ToolName } from "../../../core/tools/index.js";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.js";
 import { convertToPng } from "../../../utils/image-convert.js";
 import { theme } from "../theme/theme.js";
@@ -21,7 +21,7 @@ export class ToolExecutionComponent extends Container {
 	private rendererState: any = {};
 	private imageComponents: Image[] = [];
 	private imageSpacers: Spacer[] = [];
-	private toolName: string;
+	readonly toolName: string;
 	private toolCallId: string;
 	private args: any;
 	private expanded = false;
@@ -60,7 +60,7 @@ export class ToolExecutionComponent extends Container {
 		this.builtInToolDefinition = createAllToolDefinitions(cwd)[toolName as ToolName];
 		this.showImages = options.showImages ?? true;
 		this.imageWidthCells = options.imageWidthCells ?? 60;
-		this.verbosityLevel = options.verbosityLevel ?? "full";
+		this.verbosityLevel = options.verbosityLevel ?? "compact";
 		this.ui = ui;
 		this.cwd = cwd;
 
@@ -230,11 +230,15 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private updateDisplay(): void {
-		const bgFn = this.isPartial
-			? (text: string) => theme.bg("toolPendingBg", text)
-			: this.result?.isError
-				? (text: string) => theme.bg("toolErrorBg", text)
-				: (text: string) => theme.bg("toolSuccessBg", text);
+		const isCompactMode = this.verbosityLevel === "compact" && !this.expanded;
+		// In compact mode use no background — dot indicator conveys state
+		const bgFn = isCompactMode
+			? (text: string) => text
+			: this.isPartial
+				? (text: string) => theme.bg("toolPendingBg", text)
+				: this.result?.isError
+					? (text: string) => theme.bg("toolErrorBg", text)
+					: (text: string) => theme.bg("toolSuccessBg", text);
 
 		let hasContent = false;
 		this.hideComponent = false;
@@ -365,32 +369,33 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private _formatCompactLine(): string {
-		// Status indicator
-		const status = this.isPartial
-			? theme.fg("muted", "⏳")
+		// ◆ diamond: muted = running, green = done, red = error
+		const diamond = this.isPartial
+			? theme.fg("muted", "\u25c6")
 			: this.result?.isError
-				? theme.fg("error", "✗")
-				: theme.fg("success", "✓");
+				? theme.fg("error", "\u25c6")
+				: theme.fg("success", "\u25c6");
 
-		// Type label: built-in tools use their name, others are [mcp]
-		const typeLabel = allToolNames.has(this.toolName as ToolName)
-			? theme.fg("muted", `[${this.toolName}]`)
-			: theme.fg("muted", "[mcp]");
+		// Prefer display label from definition, fall back to raw tool name
+		const displayName = this.toolDefinition?.label ?? this.builtInToolDefinition?.label ?? this.toolName;
+		const name = theme.fg("toolTitle", displayName);
 
-		// Tool name
-		const name = theme.fg("toolTitle", this.toolName);
-
-		// Args summary: first string value found, or first key=value, max 60 chars
+		// Args summary: first string value found, or first key=value, max 55 chars
 		const argSummary = this._summarizeArgs();
 
-		const parts = [theme.fg("dim", "◆"), typeLabel, name];
+		const parts = [`  ${diamond}`, name];
 		if (argSummary) parts.push(theme.fg("dim", argSummary));
-		if (!this.isPartial) parts.push(status);
 
-		// Brief result summary (non-error, after completion)
+		// Result hint (non-error only): "· first line of output"
 		if (!this.isPartial && !this.result?.isError) {
 			const resultSummary = this._summarizeResult();
-			if (resultSummary) parts.push(theme.fg("muted", resultSummary));
+			if (resultSummary) parts.push(theme.fg("dim", `\u00b7 ${resultSummary}`));
+		}
+
+		// Error hint
+		if (!this.isPartial && this.result?.isError) {
+			const errSummary = this._summarizeResult();
+			if (errSummary) parts.push(theme.fg("error", errSummary));
 		}
 
 		return parts.join(" ");

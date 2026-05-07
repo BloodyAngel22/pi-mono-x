@@ -158,6 +158,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			return () => {};
 		},
 
+		requestRender(): void {
+			// TUI re-render not supported in RPC mode
+		},
+
 		setStatus(key: string, text: string | undefined): void {
 			// Fire and forget - no response needed
 			output({

@@ -1,7 +1,15 @@
-import { type Component, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { type Component, type TUI, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
 import { theme } from "../theme/theme.js";
+
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+function formatTaskElapsed(startTime: number): string {
+	const elapsed = Math.floor((Date.now() - startTime) / 1000);
+	if (elapsed < 60) return `${elapsed}s`;
+	return `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+}
 
 /**
  * Sanitize text for display in a single-line status.
@@ -32,11 +40,41 @@ function formatTokens(count: number): string {
  */
 export class FooterComponent implements Component {
 	private autoCompactEnabled = true;
+	private taskStartTime: number | null = null;
+	private taskLabel = "Working\u2026";
+	private spinnerFrame = 0;
+	private spinnerTimer: NodeJS.Timeout | null = null;
+	private ui: TUI | null = null;
 
 	constructor(
 		private session: AgentSession,
 		private footerData: ReadonlyFooterDataProvider,
-	) {}
+		ui?: TUI,
+	) {
+		this.ui = ui ?? null;
+	}
+
+	/** Call when the agent starts processing a user prompt. */
+	startTask(label?: string): void {
+		this.taskStartTime = Date.now();
+		this.taskLabel = label ?? "Working\u2026";
+		this.spinnerFrame = 0;
+		if (!this.spinnerTimer) {
+			this.spinnerTimer = setInterval(() => {
+				this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER_FRAMES.length;
+				this.ui?.requestRender();
+			}, 80);
+		}
+	}
+
+	/** Call when the agent finishes processing. */
+	stopTask(): void {
+		this.taskStartTime = null;
+		if (this.spinnerTimer) {
+			clearInterval(this.spinnerTimer);
+			this.spinnerTimer = null;
+		}
+	}
 
 	setSession(session: AgentSession): void {
 		this.session = session;
@@ -208,6 +246,15 @@ export class FooterComponent implements Component {
 
 		const pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
 		const lines = [pwdLine, dimStatsLeft + dimRemainder];
+
+		// Working indicator: animated spinner + label + elapsed time
+		if (this.taskStartTime !== null) {
+			const spinner = theme.fg("accent", SPINNER_FRAMES[this.spinnerFrame] ?? "⠋");
+			const label = theme.fg("dim", this.taskLabel);
+			const elapsed = theme.fg("dim", formatTaskElapsed(this.taskStartTime));
+			const workingLine = `${spinner} ${label} ${elapsed}`;
+			lines.push(truncateToWidth(workingLine, width, theme.fg("dim", "...")));
+		}
 
 		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();

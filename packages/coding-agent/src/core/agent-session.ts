@@ -434,13 +434,53 @@ export class AgentSession {
 		let value: string;
 
 		if (toolName === "bash") {
-			// Plan mode blocks bash execution
+			// Plan mode: only allow read-only commands
 			if (this.planMode.active) {
-				return {
-					block: true,
-					reason:
-						"[PLAN MODE] Bash execution is disabled in plan mode. Analyze the codebase using read/grep/find, then update the plan file.",
-				};
+				const cmd = String(args.command ?? "").trim();
+				// Match the leading command name (before spaces, pipes, redirects, etc.)
+				const leadingCmd =
+					cmd
+						.split(/[\s|;&(<]/)[0]
+						.split("/")
+						.pop() ?? "";
+				const readOnlyCmds = new Set([
+					"ls",
+					"cat",
+					"grep",
+					"find",
+					"rg",
+					"head",
+					"tail",
+					"echo",
+					"pwd",
+					"wc",
+					"file",
+					"stat",
+					"du",
+					"df",
+					"sort",
+					"uniq",
+					"cut",
+					"awk",
+					"sed",
+					"tr",
+					"less",
+					"bat",
+					"fd",
+					"tree",
+					"which",
+					"type",
+					"env",
+					"printenv",
+				]);
+				if (!readOnlyCmds.has(leadingCmd)) {
+					return {
+						block: true,
+						reason:
+							`[PLAN MODE] Only read-only commands are allowed (ls, cat, grep, find, rg, head, tail…). ` +
+							`Command blocked: \`${cmd}\`\nAnalyze the codebase using read-only tools, then update the plan file.`,
+					};
+				}
 			}
 			const cmd = String(args.command ?? "");
 			// Critical deny — always block regardless of user rules
@@ -469,8 +509,9 @@ export class AgentSession {
 			value = filePath;
 		} else {
 			// MCP or other tools
-			const builtinTools = new Set(["read", "grep", "find", "ls"]);
-			if (builtinTools.has(toolName)) return undefined; // read-only tools always allowed
+			// Built-in read-only tools and bundled interaction tools are always allowed
+			const alwaysAllowed = new Set(["read", "grep", "find", "ls", "ask_user"]);
+			if (alwaysAllowed.has(toolName)) return undefined;
 			type = "mcp";
 			value = toolName;
 		}

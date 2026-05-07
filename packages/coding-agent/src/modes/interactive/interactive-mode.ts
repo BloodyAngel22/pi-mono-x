@@ -33,7 +33,6 @@ import {
 	Container,
 	fuzzyFilter,
 	Loader,
-	type LoaderIndicatorOptions,
 	Markdown,
 	matchesKey,
 	ProcessTerminal,
@@ -112,10 +111,12 @@ import { ScopedModelsSelectorComponent } from "./components/scoped-models-select
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
+import { TaskBlockComponent } from "./components/task-block.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
 import { UserMessageComponent } from "./components/user-message.js";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.js";
+import { WorkingStatusComponent } from "./components/working-status.js";
 import {
 	getAvailableThemes,
 	getAvailableThemesWithPaths,
@@ -235,10 +236,7 @@ export class InteractiveMode {
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
 	private loadingAnimation: Loader | undefined = undefined;
-	private workingMessage: string | undefined = undefined;
-	private workingVisible = true;
-	private workingIndicatorOptions: LoaderIndicatorOptions | undefined = undefined;
-	private readonly defaultWorkingMessage = "Working...";
+	private workingStatus: WorkingStatusComponent | undefined = undefined;
 	private readonly defaultHiddenThinkingLabel = "Thinking...";
 	private hiddenThinkingLabel = this.defaultHiddenThinkingLabel;
 
@@ -258,6 +256,11 @@ export class InteractiveMode {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+
+	// Current task block being built (groups tool calls under a named header)
+	private currentTaskBlock: TaskBlockComponent | undefined = undefined;
+	// Whether the current streaming assistant message has produced any tool calls
+	private currentMessageHadToolCalls = false;
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
@@ -366,7 +369,7 @@ export class InteractiveMode {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
-		this.footer = new FooterComponent(this.session, this.footerDataProvider);
+		this.footer = new FooterComponent(this.session, this.footerDataProvider, this.ui);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 
 		// Load hide thinking block setting
@@ -1651,47 +1654,41 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private getWorkingLoaderMessage(): string {
-		return this.workingMessage ?? this.defaultWorkingMessage;
-	}
-
-	private createWorkingLoader(): Loader {
-		return new Loader(
-			this.ui,
-			(spinner) => theme.fg("accent", spinner),
-			(text) => theme.fg("muted", text),
-			this.getWorkingLoaderMessage(),
-			this.workingIndicatorOptions,
-		);
-	}
-
 	private stopWorkingLoader(): void {
 		if (this.loadingAnimation) {
 			this.loadingAnimation.stop();
 			this.loadingAnimation = undefined;
 		}
+		if (this.workingStatus) {
+			this.workingStatus.stop();
+			this.workingStatus = undefined;
+		}
 		this.statusContainer.clear();
 	}
 
+	private startWorkingStatus(message?: string): void {
+		this.stopWorkingLoader();
+		this.workingStatus = new WorkingStatusComponent(this.ui);
+		this.workingStatus.start(message);
+		this.statusContainer.addChild(this.workingStatus);
+	}
+
+	private setWorkingMessage(message?: string): void {
+		this.workingStatus?.setMessage(message);
+	}
+
+	private updateWorkingUsage(message: AssistantMessage): void {
+		this.workingStatus?.setUsage(message.usage);
+	}
+
 	private setWorkingVisible(visible: boolean): void {
-		this.workingVisible = visible;
 		if (!visible) {
 			this.stopWorkingLoader();
 			this.ui.requestRender();
-			return;
+		} else if (!this.workingStatus) {
+			this.startWorkingStatus();
+			this.ui.requestRender();
 		}
-		if (this.session.isStreaming && !this.loadingAnimation) {
-			this.statusContainer.clear();
-			this.loadingAnimation = this.createWorkingLoader();
-			this.statusContainer.addChild(this.loadingAnimation);
-		}
-		this.ui.requestRender();
-	}
-
-	private setWorkingIndicator(options?: LoaderIndicatorOptions): void {
-		this.workingIndicatorOptions = options;
-		this.loadingAnimation?.setIndicator(options);
-		this.ui.requestRender();
 	}
 
 	private setHiddenThinkingLabel(label?: string): void {
@@ -1786,12 +1783,6 @@ export class InteractiveMode {
 		this.setupAutocompleteProvider();
 		this.defaultEditor.onExtensionShortcut = undefined;
 		this.updateTerminalTitle();
-		this.workingMessage = undefined;
-		this.workingVisible = true;
-		this.setWorkingIndicator();
-		if (this.loadingAnimation) {
-			this.loadingAnimation.setMessage(`${this.defaultWorkingMessage} (${keyText("app.interrupt")} to interrupt)`);
-		}
 		this.setHiddenThinkingLabel();
 	}
 
@@ -1936,15 +1927,11 @@ export class InteractiveMode {
 			input: (title, placeholder, opts) => this.showExtensionInput(title, placeholder, opts),
 			notify: (message, type) => this.showExtensionNotify(message, type),
 			onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),
+			requestRender: () => this.ui.requestRender(),
 			setStatus: (key, text) => this.setExtensionStatus(key, text),
-			setWorkingMessage: (message) => {
-				this.workingMessage = message;
-				if (this.loadingAnimation) {
-					this.loadingAnimation.setMessage(message ?? this.defaultWorkingMessage);
-				}
-			},
+			setWorkingMessage: (message) => this.setWorkingMessage(message),
 			setWorkingVisible: (visible) => this.setWorkingVisible(visible),
-			setWorkingIndicator: (options) => this.setWorkingIndicator(options),
+			setWorkingIndicator: () => {},
 			setHiddenThinkingLabel: (label) => this.setHiddenThinkingLabel(label),
 			setWidget: (key, content, options) => this.setExtensionWidget(key, content, options),
 			setFooter: (factory) => this.setExtensionFooter(factory),
@@ -2673,6 +2660,8 @@ export class InteractiveMode {
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(true);
 				}
+				this.currentTaskBlock = undefined;
+				this.currentMessageHadToolCalls = false;
 				// Restore main escape handler if retry handler is still active
 				// (retry success event fires later, but we need main handler now)
 				if (this.retryEscapeHandler) {
@@ -2687,11 +2676,7 @@ export class InteractiveMode {
 					this.retryLoader.stop();
 					this.retryLoader = undefined;
 				}
-				this.stopWorkingLoader();
-				if (this.workingVisible) {
-					this.loadingAnimation = this.createWorkingLoader();
-					this.statusContainer.addChild(this.loadingAnimation);
-				}
+				this.startWorkingStatus();
 				this.ui.requestRender();
 				break;
 
@@ -2715,6 +2700,8 @@ export class InteractiveMode {
 					this.updatePendingMessagesDisplay();
 					this.ui.requestRender();
 				} else if (event.message.role === "assistant") {
+					this.setWorkingMessage("Thinking through the task...");
+					this.currentMessageHadToolCalls = false;
 					this.streamingComponent = new AssistantMessageComponent(
 						undefined,
 						this.hideThinkingBlock,
@@ -2731,11 +2718,13 @@ export class InteractiveMode {
 			case "message_update":
 				if (this.streamingComponent && event.message.role === "assistant") {
 					this.streamingMessage = event.message;
+					this.updateWorkingUsage(this.streamingMessage);
 					this.streamingComponent.updateContent(this.streamingMessage);
 
 					for (const content of this.streamingMessage.content) {
 						if (content.type === "toolCall") {
 							if (!this.pendingTools.has(content.id)) {
+								this.setWorkingMessage(`Preparing ${content.name}...`);
 								const component = new ToolExecutionComponent(
 									content.name,
 									content.id,
@@ -2750,7 +2739,7 @@ export class InteractiveMode {
 									this.sessionManager.getCwd(),
 								);
 								component.setExpanded(this.toolOutputExpanded);
-								this.chatContainer.addChild(component);
+								this.addToolToBlock(component);
 								this.pendingTools.set(content.id, component);
 							} else {
 								const component = this.pendingTools.get(content.id);
@@ -2798,6 +2787,7 @@ export class InteractiveMode {
 					}
 					this.streamingComponent = undefined;
 					this.streamingMessage = undefined;
+					// Task block survives until agent_end so all messages are grouped together
 					this.footer.invalidate();
 				}
 				this.ui.requestRender();
@@ -2806,6 +2796,7 @@ export class InteractiveMode {
 			case "tool_execution_start": {
 				let component = this.pendingTools.get(event.toolCallId);
 				if (!component) {
+					this.setWorkingMessage(`Running ${event.toolName}...`);
 					component = new ToolExecutionComponent(
 						event.toolName,
 						event.toolCallId,
@@ -2820,9 +2811,10 @@ export class InteractiveMode {
 						this.sessionManager.getCwd(),
 					);
 					component.setExpanded(this.toolOutputExpanded);
-					this.chatContainer.addChild(component);
+					this.addToolToBlock(component);
 					this.pendingTools.set(event.toolCallId, component);
 				}
+				this.setWorkingMessage(`Running ${event.toolName}...`);
 				component.markExecutionStarted();
 				this.ui.requestRender();
 				break;
@@ -2831,6 +2823,7 @@ export class InteractiveMode {
 			case "tool_execution_update": {
 				const component = this.pendingTools.get(event.toolCallId);
 				if (component) {
+					this.setWorkingMessage(`Reading ${event.toolName} output...`);
 					component.updateResult({ ...event.partialResult, isError: false }, true);
 					this.ui.requestRender();
 				}
@@ -2842,6 +2835,9 @@ export class InteractiveMode {
 				if (component) {
 					component.updateResult({ ...event.result, isError: event.isError });
 					this.pendingTools.delete(event.toolCallId);
+					if (this.pendingTools.size === 0) {
+						this.setWorkingMessage();
+					}
 					this.ui.requestRender();
 				}
 				break;
@@ -2851,10 +2847,11 @@ export class InteractiveMode {
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(false);
 				}
-				if (this.loadingAnimation) {
-					this.loadingAnimation.stop();
-					this.loadingAnimation = undefined;
-					this.statusContainer.clear();
+				this.footer.stopTask();
+				this.stopWorkingLoader();
+				if (this.currentTaskBlock) {
+					this.currentTaskBlock.finalize(this.pendingTools.size > 0);
+					this.currentTaskBlock = undefined;
 				}
 				if (this.streamingComponent) {
 					this.chatContainer.removeChild(this.streamingComponent);
@@ -3143,8 +3140,10 @@ export class InteractiveMode {
 		for (const message of sessionContext.messages) {
 			// Assistant messages need special handling for tool calls
 			if (message.role === "assistant") {
+				// Always add the message text component (streaming text stays visible)
 				this.addMessageToChat(message);
-				// Render tool call components
+				// Render tool call components grouped in a TaskBlock
+				let historyBlock: TaskBlockComponent | undefined;
 				for (const content of message.content) {
 					if (content.type === "toolCall") {
 						const component = new ToolExecutionComponent(
@@ -3161,7 +3160,20 @@ export class InteractiveMode {
 							this.sessionManager.getCwd(),
 						);
 						component.setExpanded(this.toolOutputExpanded);
-						this.chatContainer.addChild(component);
+
+						if (!historyBlock) {
+							historyBlock = new TaskBlockComponent(content.name, this.ui);
+							historyBlock.setExpanded(this.toolOutputExpanded);
+							this.chatContainer.addChild(historyBlock);
+						} else {
+							const names = historyBlock.toolNames;
+							if (names.length === 1) {
+								historyBlock.updateLabel(`${names[0]}, ${content.name}`);
+							} else if (names.length > 1) {
+								historyBlock.updateLabel(`${names[0]} +${names.length}`);
+							}
+						}
+						historyBlock.addTool(component);
 
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
 							let errorMessage: string;
@@ -3179,6 +3191,10 @@ export class InteractiveMode {
 							this.pendingTools.set(content.id, component);
 						}
 					}
+				}
+				if (historyBlock) {
+					const isError = message.stopReason === "aborted" || message.stopReason === "error";
+					historyBlock.finalize(isError);
 				}
 			} else if (message.role === "toolResult") {
 				// Match tool results to pending tool components
@@ -3418,6 +3434,41 @@ export class InteractiveMode {
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
 		}
+	}
+
+	/**
+	 * Add a ToolExecutionComponent to the current TaskBlock, creating one if needed.
+	 * On the first tool call of each message, removes the intermediate reasoning text from chat.
+	 * One task block persists for the entire agent turn (agent_start → agent_end).
+	 */
+	private addToolToBlock(component: ToolExecutionComponent): void {
+		// First tool call in this message: remove the intermediate reasoning text
+		if (!this.currentMessageHadToolCalls) {
+			this.currentMessageHadToolCalls = true;
+			if (this.streamingComponent) {
+				this.chatContainer.removeChild(this.streamingComponent);
+			}
+		}
+
+		if (!this.currentTaskBlock) {
+			const label = this.extractTaskLabel() ?? component.toolName;
+			this.currentTaskBlock = new TaskBlockComponent(label, this.ui);
+			this.currentTaskBlock.setExpanded(this.toolOutputExpanded);
+			this.chatContainer.addChild(this.currentTaskBlock);
+		}
+		this.currentTaskBlock.addTool(component);
+	}
+
+	/** Extract the first short line of the current streaming message as a task label. */
+	private extractTaskLabel(): string | undefined {
+		if (!this.streamingMessage) return undefined;
+		for (const c of this.streamingMessage.content) {
+			if (c.type === "text" && c.text.trim()) {
+				const firstLine = c.text.trim().split("\n")[0].trim().slice(0, 60);
+				return firstLine || undefined;
+			}
+		}
+		return undefined;
 	}
 
 	private toggleToolOutputExpansion(): void {
@@ -3806,6 +3857,8 @@ export class InteractiveMode {
 						for (const child of this.chatContainer.children) {
 							if (child instanceof ToolExecutionComponent) {
 								child.setShowImages(enabled);
+							} else if (child instanceof TaskBlockComponent) {
+								child.setShowImages(enabled);
 							}
 						}
 					},
@@ -3813,6 +3866,8 @@ export class InteractiveMode {
 						this.settingsManager.setImageWidthCells(width);
 						for (const child of this.chatContainer.children) {
 							if (child instanceof ToolExecutionComponent) {
+								child.setImageWidthCells(width);
+							} else if (child instanceof TaskBlockComponent) {
 								child.setImageWidthCells(width);
 							}
 						}

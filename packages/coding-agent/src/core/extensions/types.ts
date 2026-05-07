@@ -137,6 +137,9 @@ export interface ExtensionUIContext {
 	/** Listen to raw terminal input (interactive mode only). Returns an unsubscribe function. */
 	onTerminalInput(handler: TerminalInputHandler): () => void;
 
+	/** Request a TUI re-render (interactive mode only; no-op otherwise). */
+	requestRender(): void;
+
 	/** Set status text in the footer/status bar. Pass undefined to clear. */
 	setStatus(key: string, text: string | undefined): void;
 
