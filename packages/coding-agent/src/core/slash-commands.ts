@@ -41,6 +41,10 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "pwd", description: "Print current working directory" },
 	{ name: "ls", description: "List directory contents. Example: /ls  or  /ls ~/projects" },
 	{ name: "permissions", description: "View and manage agent permission rules (allow/ask/deny)" },
+	{ name: "yolo", description: "Toggle session-only YOLO permissions mode" },
+	{ name: "vim", description: "Toggle Vim input mode" },
+	{ name: "btw", description: "Ask an out-of-band question without adding it to session history" },
+	{ name: "search", description: "Search prompt history" },
 	{
 		name: "plan",
 		description: "Enter planning mode (agent writes a plan, no code execution). Example: /plan refactor auth",

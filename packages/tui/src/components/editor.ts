@@ -191,10 +191,26 @@ interface EditorState {
 	cursorCol: number;
 }
 
+type VimInputMode = "insert" | "normal" | "visual";
+type VimOperator = "c" | "d" | "y";
+type VimMotion =
+	| "line-start"
+	| "line-end"
+	| "word-forward"
+	| "word-backward"
+	| "word-end"
+	| "buffer-start"
+	| "buffer-end";
+type VimPendingKey = VimOperator | "g" | "f" | "F" | "t" | "T" | "r";
+type VimPosition = { line: number; col: number };
+type VimVisualKind = "char" | "line";
+
 interface LayoutLine {
 	text: string;
 	hasCursor: boolean;
 	cursorPos?: number;
+	logicalLine: number;
+	startCol: number;
 }
 
 export interface EditorTheme {
@@ -261,6 +277,13 @@ export class Editor implements Component, Focusable {
 	private history: string[] = [];
 	private historyIndex: number = -1; // -1 = not browsing, 0 = most recent, 1 = older, etc.
 
+	private vimModeEnabled = false;
+	private vimInputMode: VimInputMode = "insert";
+	private vimPendingKey: VimPendingKey | null = null;
+	private vimVisualAnchor: VimPosition | null = null;
+	private vimVisualKind: VimVisualKind = "char";
+	private lastVimCharSearch: { char: string; mode: "f" | "F" | "t" | "T" } | null = null;
+
 	// Kill ring for Emacs-style kill/yank operations
 	private killRing = new KillRing();
 	private lastAction: "kill" | "yank" | "type-word" | null = null;
@@ -280,6 +303,7 @@ export class Editor implements Component, Focusable {
 
 	// Undo support
 	private undoStack = new UndoStack<EditorState>();
+	private redoStack = new UndoStack<EditorState>();
 
 	public onSubmit?: (text: string) => void;
 	public onChange?: (text: string) => void;
@@ -348,6 +372,26 @@ export class Editor implements Component, Focusable {
 		if (this.history.length > 100) {
 			this.history.pop();
 		}
+	}
+
+	getHistory(): string[] {
+		return [...this.history];
+	}
+
+	setVimModeEnabled(enabled: boolean): void {
+		this.vimModeEnabled = enabled;
+		this.vimInputMode = "insert";
+		this.vimPendingKey = null;
+		this.vimVisualAnchor = null;
+		this.tui.requestRender();
+	}
+
+	isVimModeEnabled(): boolean {
+		return this.vimModeEnabled;
+	}
+
+	getVimInputMode(): VimInputMode {
+		return this.vimInputMode;
 	}
 
 	private isEditorEmpty(): boolean {
@@ -465,14 +509,38 @@ export class Editor implements Component, Focusable {
 		// Render each visible layout line
 		// Emit hardware cursor marker only when focused and not showing autocomplete
 		const emitCursorMarker = this.focused && !this.autocompleteState;
+		const visualRange = this.getVimVisualRange();
 
 		for (const layoutLine of visibleLines) {
 			let displayText = layoutLine.text;
 			let lineVisibleWidth = visibleWidth(layoutLine.text);
 			let cursorInPadding = false;
 
+			if (visualRange) {
+				const highlightStart = Math.max(
+					0,
+					visualRange.start.line === layoutLine.logicalLine ? visualRange.start.col - layoutLine.startCol : 0,
+				);
+				const highlightEnd = Math.min(
+					displayText.length,
+					visualRange.end.line === layoutLine.logicalLine
+						? visualRange.end.col - layoutLine.startCol
+						: displayText.length,
+				);
+				if (
+					layoutLine.logicalLine >= visualRange.start.line &&
+					layoutLine.logicalLine <= visualRange.end.line &&
+					highlightEnd > highlightStart
+				) {
+					displayText =
+						displayText.slice(0, highlightStart) +
+						`\x1b[1;4m${displayText.slice(highlightStart, highlightEnd)}\x1b[22;24m` +
+						displayText.slice(highlightEnd);
+				}
+			}
+
 			// Add cursor if this line has it
-			if (layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
+			if (!visualRange && layoutLine.hasCursor && layoutLine.cursorPos !== undefined) {
 				const before = displayText.slice(0, layoutLine.cursorPos);
 				const after = displayText.slice(layoutLine.cursorPos);
 
@@ -578,6 +646,10 @@ export class Editor implements Component, Focusable {
 				}
 				return;
 			}
+			return;
+		}
+
+		if (this.handleVimInput(data)) {
 			return;
 		}
 
@@ -820,6 +892,390 @@ export class Editor implements Component, Focusable {
 		}
 	}
 
+	private handleVimInput(data: string): boolean {
+		if (!this.vimModeEnabled) return false;
+		if (matchesKey(data, "escape")) {
+			this.vimPendingKey = null;
+			this.vimVisualAnchor = null;
+			this.vimVisualKind = "char";
+			this.vimInputMode = "normal";
+			this.cancelAutocomplete();
+			this.tui.requestRender();
+			return true;
+		}
+		if (this.vimInputMode === "insert") return false;
+		if (matchesKey(data, "ctrl+r")) {
+			this.redo();
+			return true;
+		}
+		const printable = decodePrintableKey(data) ?? (data.length === 1 && data.charCodeAt(0) >= 32 ? data : undefined);
+		if (printable === undefined) return false;
+		if (this.handlePendingVimKey(printable)) return true;
+		if (this.vimInputMode === "visual") return this.handleVimVisualInput(printable);
+		if (printable === "i" || printable === "I") {
+			if (printable === "I") this.moveToLineStart();
+			this.vimInputMode = "insert";
+			this.tui.requestRender();
+			return true;
+		}
+		if (printable === "a") {
+			const currentLine = this.state.lines[this.state.cursorLine] || "";
+			this.setCursorCol(Math.min(this.state.cursorCol + 1, currentLine.length));
+			this.vimInputMode = "insert";
+			this.tui.requestRender();
+			return true;
+		}
+		if (printable === "A") {
+			this.moveToLineEnd();
+			this.vimInputMode = "insert";
+			this.tui.requestRender();
+			return true;
+		}
+		if (printable === "o" || printable === "O") {
+			this.openVimLine(printable === "O" ? "above" : "below");
+			this.vimInputMode = "insert";
+			this.tui.requestRender();
+			return true;
+		}
+		if (printable === "v" || printable === "V") {
+			this.startVimVisualMode(printable === "V" ? "line" : "char");
+			return true;
+		}
+		if (printable === "h") {
+			this.moveCursor(0, -1);
+			return true;
+		}
+		if (printable === "j") {
+			this.moveCursor(1, 0);
+			return true;
+		}
+		if (printable === "k") {
+			this.moveCursor(-1, 0);
+			return true;
+		}
+		if (printable === "l") {
+			this.moveCursor(0, 1);
+			return true;
+		}
+		if (printable === "0") {
+			this.moveToLineStart();
+			return true;
+		}
+		if (printable === "$") {
+			this.moveToLineEnd();
+			return true;
+		}
+		if (printable === "w") {
+			this.moveWordForwards();
+			return true;
+		}
+		if (printable === "b") {
+			this.moveWordBackwards();
+			return true;
+		}
+		if (printable === "e") {
+			this.moveWordEndForwards();
+			return true;
+		}
+		if (printable === "^") {
+			this.moveToFirstNonBlank();
+			return true;
+		}
+		if (printable === "x") {
+			this.handleForwardDelete();
+			return true;
+		}
+		if (printable === "X") {
+			this.handleBackspace();
+			return true;
+		}
+		if (printable === "u") {
+			this.undo();
+			return true;
+		}
+		if (printable === "p" || printable === "P") {
+			this.putVimText(printable === "P" ? "before" : "after");
+			return true;
+		}
+		if (printable === "D") {
+			this.applyVimOperatorToMotion("d", "line-end");
+			return true;
+		}
+		if (printable === "C") {
+			this.applyVimOperatorToMotion("c", "line-end");
+			return true;
+		}
+		if (printable === "Y") {
+			this.yankCurrentLine();
+			return true;
+		}
+		if (printable === "G") {
+			this.moveToLastLine();
+			return true;
+		}
+		if (printable === ";" || printable === ",") {
+			this.repeatLastVimCharSearch(printable === ",");
+			return true;
+		}
+		if (
+			printable === "d" ||
+			printable === "c" ||
+			printable === "y" ||
+			printable === "g" ||
+			printable === "f" ||
+			printable === "F" ||
+			printable === "t" ||
+			printable === "T" ||
+			printable === "r"
+		) {
+			this.vimPendingKey = printable;
+			return true;
+		}
+		this.vimPendingKey = null;
+		return true;
+	}
+
+	private handlePendingVimKey(printable: string): boolean {
+		const pending = this.vimPendingKey;
+		if (!pending) return false;
+		this.vimPendingKey = null;
+		if (pending === "g") {
+			if (printable === "g") this.moveToFirstLine();
+			else if (printable === "e") this.moveWordEndBackwards();
+			return true;
+		}
+		if (pending === "f" || pending === "F" || pending === "t" || pending === "T") {
+			this.searchVimChar(printable, pending);
+			return true;
+		}
+		if (pending === "r") {
+			this.replaceVimChar(printable);
+			return true;
+		}
+		if (printable === pending) {
+			if (pending === "d") this.deleteCurrentLine();
+			else if (pending === "c") this.changeCurrentLine();
+			else this.yankCurrentLine();
+			return true;
+		}
+		const motion = this.vimMotionFromKey(printable);
+		if (motion) this.applyVimOperatorToMotion(pending, motion);
+		return true;
+	}
+
+	private handleVimVisualInput(printable: string): boolean {
+		if (printable === "v" || printable === "V") {
+			this.vimInputMode = "normal";
+			this.vimVisualAnchor = null;
+			this.tui.requestRender();
+			return true;
+		}
+		if (printable === "d" || printable === "y" || printable === "c") {
+			this.applyVimOperatorToVisual(printable);
+			return true;
+		}
+		if (printable === "h") this.moveCursor(0, -1);
+		else if (printable === "j") this.moveCursor(1, 0);
+		else if (printable === "k") this.moveCursor(-1, 0);
+		else if (printable === "l") this.moveCursor(0, 1);
+		else if (printable === "w") this.moveWordForwards();
+		else if (printable === "b") this.moveWordBackwards();
+		else if (printable === "e") this.moveWordEndForwards();
+		else if (printable === "0") this.moveToLineStart();
+		else if (printable === "^") this.moveToFirstNonBlank();
+		else if (printable === "$") this.moveToLineEnd();
+		else if (printable === "G") this.moveToLastLine();
+		else return true;
+		this.tui.requestRender();
+		return true;
+	}
+
+	private startVimVisualMode(kind: VimVisualKind): void {
+		this.vimInputMode = "visual";
+		this.vimVisualKind = kind;
+		this.vimVisualAnchor = { line: this.state.cursorLine, col: this.state.cursorCol };
+		this.tui.requestRender();
+	}
+
+	private vimMotionFromKey(key: string): VimMotion | undefined {
+		if (key === "0" || key === "^") return "line-start";
+		if (key === "$") return "line-end";
+		if (key === "w") return "word-forward";
+		if (key === "b") return "word-backward";
+		if (key === "e") return "word-end";
+		if (key === "G") return "buffer-end";
+		return undefined;
+	}
+
+	private applyVimOperatorToMotion(operator: VimOperator, motion: VimMotion): void {
+		const start = this.getVimPosition();
+		this.applyVimMotion(motion);
+		const end = this.getVimPosition();
+		this.applyVimOperatorToRange(operator, this.normalizeVimRange(start, end, true));
+	}
+
+	private applyVimOperatorToVisual(operator: VimOperator): void {
+		const range = this.getVimVisualRange();
+		if (!range) return;
+		this.applyVimOperatorToRange(operator, range);
+	}
+
+	private applyVimOperatorToRange(operator: VimOperator, range: { start: VimPosition; end: VimPosition }): void {
+		const text = this.getVimRangeText(range);
+		if (operator === "y") {
+			this.killRing.push(text, { prepend: false });
+			this.vimInputMode = "normal";
+			this.vimVisualAnchor = null;
+			this.tui.requestRender();
+			return;
+		}
+		this.deleteVimRange(range, true);
+		this.vimInputMode = operator === "c" ? "insert" : "normal";
+		this.vimVisualAnchor = null;
+		this.tui.requestRender();
+	}
+
+	private applyVimMotion(motion: VimMotion): void {
+		if (motion === "line-start") this.moveToLineStart();
+		else if (motion === "line-end") this.moveToLineEnd();
+		else if (motion === "word-forward") this.moveWordForwards();
+		else if (motion === "word-backward") this.moveWordBackwards();
+		else if (motion === "word-end") this.moveWordEndForwards();
+		else if (motion === "buffer-start") this.moveToFirstLine();
+		else this.moveToLastLine();
+	}
+
+	private getVimPosition(): VimPosition {
+		return { line: this.state.cursorLine, col: this.state.cursorCol };
+	}
+
+	private compareVimPositions(a: VimPosition, b: VimPosition): number {
+		if (a.line !== b.line) return a.line - b.line;
+		return a.col - b.col;
+	}
+
+	private normalizeVimRange(
+		start: VimPosition,
+		end: VimPosition,
+		includeEnd: boolean,
+	): { start: VimPosition; end: VimPosition } {
+		const orderedStart = this.compareVimPositions(start, end) <= 0 ? start : end;
+		const orderedEnd = this.compareVimPositions(start, end) <= 0 ? end : start;
+		const endLine = this.state.lines[orderedEnd.line] || "";
+		return {
+			start: { line: orderedStart.line, col: orderedStart.col },
+			end: { line: orderedEnd.line, col: Math.min(endLine.length, orderedEnd.col + (includeEnd ? 1 : 0)) },
+		};
+	}
+
+	private getVimVisualRange(): { start: VimPosition; end: VimPosition } | null {
+		if (this.vimInputMode !== "visual" || !this.vimVisualAnchor) return null;
+		if (this.vimVisualKind === "line") {
+			const startLine = Math.min(this.vimVisualAnchor.line, this.state.cursorLine);
+			const endLine = Math.max(this.vimVisualAnchor.line, this.state.cursorLine);
+			return {
+				start: { line: startLine, col: 0 },
+				end: { line: endLine, col: (this.state.lines[endLine] || "").length },
+			};
+		}
+		return this.normalizeVimRange(this.vimVisualAnchor, this.getVimPosition(), true);
+	}
+
+	private getVimRangeText(range: { start: VimPosition; end: VimPosition }): string {
+		if (range.start.line === range.end.line) {
+			return (this.state.lines[range.start.line] || "").slice(range.start.col, range.end.col);
+		}
+		const parts = [(this.state.lines[range.start.line] || "").slice(range.start.col)];
+		for (let line = range.start.line + 1; line < range.end.line; line++) parts.push(this.state.lines[line] || "");
+		parts.push((this.state.lines[range.end.line] || "").slice(0, range.end.col));
+		return parts.join("\n");
+	}
+
+	private deleteVimRange(range: { start: VimPosition; end: VimPosition }, yank: boolean): void {
+		const text = this.getVimRangeText(range);
+		if (!text && range.start.line === range.end.line && range.start.col === range.end.col) return;
+		if (yank) this.killRing.push(text, { prepend: false });
+		this.pushUndoSnapshot();
+		if (range.start.line === range.end.line) {
+			const line = this.state.lines[range.start.line] || "";
+			this.state.lines[range.start.line] = line.slice(0, range.start.col) + line.slice(range.end.col);
+		} else {
+			const first = (this.state.lines[range.start.line] || "").slice(0, range.start.col);
+			const last = (this.state.lines[range.end.line] || "").slice(range.end.col);
+			this.state.lines.splice(range.start.line, range.end.line - range.start.line + 1, first + last);
+		}
+		if (this.state.lines.length === 0) this.state.lines = [""];
+		this.state.cursorLine = Math.min(range.start.line, this.state.lines.length - 1);
+		this.setCursorCol(Math.min(range.start.col, (this.state.lines[this.state.cursorLine] || "").length));
+		if (this.onChange) this.onChange(this.getText());
+	}
+
+	private yankCurrentLine(): void {
+		this.killRing.push(`${this.state.lines[this.state.cursorLine] || ""}\n`, { prepend: false });
+	}
+
+	private changeCurrentLine(): void {
+		this.deleteCurrentLine();
+		this.vimInputMode = "insert";
+	}
+
+	private putVimText(position: "before" | "after"): void {
+		const text = this.killRing.peek();
+		if (!text) return;
+		this.pushUndoSnapshot();
+		if (position === "after") {
+			const line = this.state.lines[this.state.cursorLine] || "";
+			this.setCursorCol(Math.min(this.state.cursorCol + 1, line.length));
+		}
+		this.insertTextAtCursorInternal(text);
+	}
+
+	private replaceVimChar(char: string): void {
+		const line = this.state.lines[this.state.cursorLine] || "";
+		if (this.state.cursorCol >= line.length) return;
+		this.pushUndoSnapshot();
+		this.state.lines[this.state.cursorLine] =
+			line.slice(0, this.state.cursorCol) + char + line.slice(this.state.cursorCol + 1);
+		if (this.onChange) this.onChange(this.getText());
+	}
+
+	private searchVimChar(char: string, mode: "f" | "F" | "t" | "T"): void {
+		this.lastVimCharSearch = { char, mode };
+		const line = this.state.lines[this.state.cursorLine] || "";
+		const forward = mode === "f" || mode === "t";
+		const index = forward
+			? line.indexOf(char, this.state.cursorCol + 1)
+			: line.lastIndexOf(char, this.state.cursorCol - 1);
+		if (index === -1) return;
+		const target = mode === "t" ? Math.max(0, index - 1) : mode === "T" ? Math.min(line.length, index + 1) : index;
+		this.setCursorCol(target);
+	}
+
+	private repeatLastVimCharSearch(reverse: boolean): void {
+		if (!this.lastVimCharSearch) return;
+		const modeMap = reverse ? { f: "F", F: "f", t: "T", T: "t" } : { f: "f", F: "F", t: "t", T: "T" };
+		this.searchVimChar(this.lastVimCharSearch.char, modeMap[this.lastVimCharSearch.mode] as "f" | "F" | "t" | "T");
+	}
+
+	private moveToFirstNonBlank(): void {
+		const line = this.state.lines[this.state.cursorLine] || "";
+		const match = line.match(/\S/);
+		this.setCursorCol(match?.index ?? 0);
+	}
+
+	private moveWordEndForwards(): void {
+		this.moveWordForwards();
+		const line = this.state.lines[this.state.cursorLine] || "";
+		while (this.state.cursorCol < line.length && !isWhitespaceChar(line[this.state.cursorCol] || "")) {
+			this.setCursorCol(this.state.cursorCol + 1);
+		}
+		if (this.state.cursorCol > 0) this.setCursorCol(this.state.cursorCol - 1);
+	}
+
+	private moveWordEndBackwards(): void {
+		this.moveWordBackwards();
+	}
+
 	private layoutText(contentWidth: number): LayoutLine[] {
 		const layoutLines: LayoutLine[] = [];
 
@@ -829,6 +1285,8 @@ export class Editor implements Component, Focusable {
 				text: "",
 				hasCursor: true,
 				cursorPos: 0,
+				logicalLine: 0,
+				startCol: 0,
 			});
 			return layoutLines;
 		}
@@ -846,11 +1304,15 @@ export class Editor implements Component, Focusable {
 						text: line,
 						hasCursor: true,
 						cursorPos: this.state.cursorCol,
+						logicalLine: i,
+						startCol: 0,
 					});
 				} else {
 					layoutLines.push({
 						text: line,
 						hasCursor: false,
+						logicalLine: i,
+						startCol: 0,
 					});
 				}
 			} else {
@@ -894,11 +1356,15 @@ export class Editor implements Component, Focusable {
 							text: chunk.text,
 							hasCursor: true,
 							cursorPos: adjustedCursorPos,
+							logicalLine: i,
+							startCol: chunk.startIndex,
 						});
 					} else {
 						layoutLines.push({
 							text: chunk.text,
 							hasCursor: false,
+							logicalLine: i,
+							startCol: chunk.startIndex,
 						});
 					}
 				}
@@ -1174,6 +1640,18 @@ export class Editor implements Component, Focusable {
 		}
 	}
 
+	private openVimLine(position: "above" | "below"): void {
+		this.cancelAutocomplete();
+		this.historyIndex = -1;
+		this.lastAction = null;
+		this.pushUndoSnapshot();
+		const insertAt = position === "above" ? this.state.cursorLine : this.state.cursorLine + 1;
+		this.state.lines.splice(insertAt, 0, "");
+		this.state.cursorLine = insertAt;
+		this.setCursorCol(0);
+		if (this.onChange) this.onChange(this.getText());
+	}
+
 	private shouldSubmitOnBackslashEnter(data: string, kb: ReturnType<typeof getKeybindings>): boolean {
 		if (this.disableSubmit) return false;
 		if (!matchesKey(data, "enter")) return false;
@@ -1195,6 +1673,7 @@ export class Editor implements Component, Focusable {
 		this.historyIndex = -1;
 		this.scrollOffset = 0;
 		this.undoStack.clear();
+		this.redoStack.clear();
 		this.lastAction = null;
 
 		if (this.onChange) this.onChange("");
@@ -1416,6 +1895,37 @@ export class Editor implements Component, Focusable {
 		this.lastAction = null;
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 		this.setCursorCol(currentLine.length);
+	}
+
+	private moveToFirstLine(): void {
+		this.lastAction = null;
+		this.state.cursorLine = 0;
+		this.setCursorCol(0);
+	}
+
+	private moveToLastLine(): void {
+		this.lastAction = null;
+		this.state.cursorLine = Math.max(0, this.state.lines.length - 1);
+		const currentLine = this.state.lines[this.state.cursorLine] || "";
+		this.setCursorCol(currentLine.length);
+	}
+
+	private deleteCurrentLine(): void {
+		this.historyIndex = -1;
+		this.lastAction = null;
+		this.killRing.push(`${this.state.lines[this.state.cursorLine] || ""}\n`, { prepend: false });
+		this.pushUndoSnapshot();
+		if (this.state.lines.length <= 1) {
+			this.state.lines = [""];
+			this.state.cursorLine = 0;
+			this.setCursorCol(0);
+		} else {
+			this.state.lines.splice(this.state.cursorLine, 1);
+			this.state.cursorLine = Math.min(this.state.cursorLine, this.state.lines.length - 1);
+			const currentLine = this.state.lines[this.state.cursorLine] || "";
+			this.setCursorCol(Math.min(this.state.cursorCol, currentLine.length));
+		}
+		if (this.onChange) this.onChange(this.getText());
 	}
 
 	private deleteToStartOfLine(): void {
@@ -1934,12 +2444,27 @@ export class Editor implements Component, Focusable {
 
 	private pushUndoSnapshot(): void {
 		this.undoStack.push(this.state);
+		this.redoStack.clear();
 	}
 
 	private undo(): void {
 		this.historyIndex = -1; // Exit history browsing mode
 		const snapshot = this.undoStack.pop();
 		if (!snapshot) return;
+		this.redoStack.push(this.state);
+		Object.assign(this.state, snapshot);
+		this.lastAction = null;
+		this.preferredVisualCol = null;
+		if (this.onChange) {
+			this.onChange(this.getText());
+		}
+	}
+
+	private redo(): void {
+		this.historyIndex = -1;
+		const snapshot = this.redoStack.pop();
+		if (!snapshot) return;
+		this.undoStack.push(this.state);
 		Object.assign(this.state, snapshot);
 		this.lastAction = null;
 		this.preferredVisualCol = null;

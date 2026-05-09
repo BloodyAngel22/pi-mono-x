@@ -120,6 +120,7 @@ export interface Settings {
 	thinkingBudgets?: ThinkingBudgetsSettings; // Custom token budgets for thinking levels
 	editorPaddingX?: number; // Horizontal padding for input editor (default: 0)
 	autocompleteMaxVisible?: number; // Max visible items in autocomplete dropdown (default: 5)
+	vimModeEnabled?: boolean;
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
@@ -1063,6 +1064,16 @@ export class SettingsManager {
 	setAutocompleteMaxVisible(maxVisible: number): void {
 		this.globalSettings.autocompleteMaxVisible = Math.max(3, Math.min(20, Math.floor(maxVisible)));
 		this.markModified("autocompleteMaxVisible");
+		this.save();
+	}
+
+	getVimModeEnabled(): boolean {
+		return this.settings.vimModeEnabled ?? false;
+	}
+
+	setVimModeEnabled(enabled: boolean): void {
+		this.globalSettings.vimModeEnabled = enabled;
+		this.markModified("vimModeEnabled");
 		this.save();
 	}
 

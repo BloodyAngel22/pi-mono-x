@@ -33,6 +33,15 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
+		if (
+			this.isVimModeEnabled() &&
+			(this.keybindings.matches(data, "app.clear") || this.keybindings.matches(data, "app.exit"))
+		) {
+			const handler = this.onCtrlD ?? this.actionHandlers.get("app.exit");
+			if (handler) handler();
+			return;
+		}
+
 		// Check for paste image keybinding
 		if (this.keybindings.matches(data, "app.clipboard.pasteImage")) {
 			this.onPasteImage?.();
@@ -43,6 +52,10 @@ export class CustomEditor extends Editor {
 
 		// Escape/interrupt - only if autocomplete is NOT active
 		if (this.keybindings.matches(data, "app.interrupt")) {
+			if (this.isVimModeEnabled() && this.getVimInputMode() !== "normal") {
+				super.handleInput(data);
+				return;
+			}
 			if (!this.isShowingAutocomplete()) {
 				// Use dynamic onEscape if set, otherwise registered handler
 				const handler = this.onEscape ?? this.actionHandlers.get("app.interrupt");

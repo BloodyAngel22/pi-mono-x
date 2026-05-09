@@ -49,6 +49,7 @@ export class FooterComponent implements Component {
 	constructor(
 		private session: AgentSession,
 		private footerData: ReadonlyFooterDataProvider,
+		private getEditorState: () => { vimEnabled: boolean; vimMode: "insert" | "normal" | "visual" },
 		ui?: TUI,
 	) {
 		this.ui = ui ?? null;
@@ -149,6 +150,16 @@ export class FooterComponent implements Component {
 		// Show plan mode indicator
 		if (this.session.planMode.active) {
 			pwd = `${theme.fg("accent", theme.bold("[PLAN]"))} ${pwd}`;
+		}
+		if (this.session.yoloPermissionsEnabled) {
+			pwd = `${theme.fg("warning", theme.bold("[YOLO]"))} ${pwd}`;
+		}
+
+		const editorState = this.getEditorState();
+		if (editorState.vimEnabled) {
+			const mode =
+				editorState.vimMode === "normal" ? "NORMAL" : editorState.vimMode === "visual" ? "VISUAL" : "INSERT";
+			pwd = `${theme.fg("accent", theme.bold(`[VIM:${mode}]`))} ${pwd}`;
 		}
 
 		// Build stats line

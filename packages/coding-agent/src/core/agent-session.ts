@@ -313,6 +313,7 @@ export class AgentSession {
 
 	// Permission system
 	private _permissionsManager: PermissionsManager | null = null;
+	private _yoloPermissionsEnabled = false;
 	/** Set by interactive mode to prompt the user when policy is "ask". */
 	permissionAsk: PermissionAskCallback | undefined;
 
@@ -358,6 +359,14 @@ export class AgentSession {
 	/** Permissions manager for allow/ask/deny policies */
 	get permissionsManager(): PermissionsManager | null {
 		return this._permissionsManager;
+	}
+
+	get yoloPermissionsEnabled(): boolean {
+		return this._yoloPermissionsEnabled;
+	}
+
+	setYoloPermissionsEnabled(enabled: boolean): void {
+		this._yoloPermissionsEnabled = enabled;
 	}
 
 	/** The active working directory (may differ from sessionManager.getCwd() after /cd). */
@@ -515,6 +524,8 @@ export class AgentSession {
 			type = "mcp";
 			value = toolName;
 		}
+
+		if (this._yoloPermissionsEnabled) return undefined;
 
 		const policy = pm.checkPolicy(type, value);
 

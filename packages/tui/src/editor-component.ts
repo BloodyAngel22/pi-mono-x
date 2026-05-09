@@ -39,6 +39,8 @@ export interface EditorComponent extends Component {
 	/** Add text to history for up/down navigation */
 	addToHistory?(text: string): void;
 
+	getHistory?(): string[];
+
 	// =========================================================================
 	// Advanced text manipulation (optional)
 	// =========================================================================
@@ -71,4 +73,8 @@ export interface EditorComponent extends Component {
 
 	/** Set max visible items in autocomplete dropdown */
 	setAutocompleteMaxVisible?(maxVisible: number): void;
+
+	setVimModeEnabled?(enabled: boolean): void;
+	isVimModeEnabled?(): boolean;
+	getVimInputMode?(): "insert" | "normal" | "visual";
 }

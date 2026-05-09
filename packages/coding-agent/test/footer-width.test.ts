@@ -81,7 +81,10 @@ describe("FooterComponent width handling", () => {
 	it("keeps all lines within width for wide session names", () => {
 		const width = 93;
 		const session = createSession({ sessionName: "한글".repeat(30) });
-		const footer = new FooterComponent(session, createFooterData(1));
+		const footer = new FooterComponent(session, createFooterData(1), () => ({
+			vimEnabled: false,
+			vimMode: "insert",
+		}));
 
 		const lines = footer.render(width);
 		for (const line of lines) {
@@ -105,7 +108,10 @@ describe("FooterComponent width handling", () => {
 				cost: { total: 1.234 },
 			},
 		});
-		const footer = new FooterComponent(session, createFooterData(2));
+		const footer = new FooterComponent(session, createFooterData(2), () => ({
+			vimEnabled: false,
+			vimMode: "insert",
+		}));
 
 		const lines = footer.render(width);
 		for (const line of lines) {

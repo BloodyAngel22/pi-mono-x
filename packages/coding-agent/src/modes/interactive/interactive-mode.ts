@@ -10,6 +10,7 @@ import * as path from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import {
 	type AssistantMessage,
+	completeSimple,
 	getProviders,
 	type ImageContent,
 	type Message,
@@ -56,6 +57,7 @@ import {
 } from "../../config.js";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.js";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.js";
+import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "../../core/auth-guidance.js";
 import type {
 	AutocompleteProviderFactory,
 	EditorFactory,
@@ -103,6 +105,7 @@ import { ExtensionEditorComponent } from "./components/extension-editor.js";
 import { ExtensionInputComponent } from "./components/extension-input.js";
 import { ExtensionSelectorComponent } from "./components/extension-selector.js";
 import { FooterComponent } from "./components/footer.js";
+import { HistorySearchSelectorComponent } from "./components/history-search-selector.js";
 import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import { LoginDialogComponent } from "./components/login-dialog.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
@@ -365,11 +368,20 @@ export class InteractiveMode {
 			paddingX: editorPaddingX,
 			autocompleteMaxVisible,
 		});
+		this.defaultEditor.setVimModeEnabled(this.settingsManager.getVimModeEnabled());
 		this.editor = this.defaultEditor;
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
-		this.footer = new FooterComponent(this.session, this.footerDataProvider, this.ui);
+		this.footer = new FooterComponent(
+			this.session,
+			this.footerDataProvider,
+			() => ({
+				vimEnabled: this.editor.isVimModeEnabled?.() ?? false,
+				vimMode: this.editor.getVimInputMode?.() ?? "insert",
+			}),
+			this.ui,
+		);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 
 		// Load hide thinking block setting
@@ -2147,61 +2159,40 @@ export class InteractiveMode {
 	 */
 	private setCustomEditorComponent(factory: EditorFactory | undefined): void {
 		this.editorComponentFactory = factory;
-
-		// Save text from current editor before switching
 		const currentText = this.editor.getText();
 
 		this.editorContainer.clear();
 
 		if (factory) {
-			// Create the custom editor with tui, theme, and keybindings
 			const newEditor = factory(this.ui, getEditorTheme(), this.keybindings);
-
-			// Wire up callbacks from the default editor
 			newEditor.onSubmit = this.defaultEditor.onSubmit;
 			newEditor.onChange = this.defaultEditor.onChange;
-
-			// Copy text from previous editor
 			newEditor.setText(currentText);
 
-			// Copy appearance settings if supported
 			if (newEditor.borderColor !== undefined) {
 				newEditor.borderColor = this.defaultEditor.borderColor;
 			}
-			if (newEditor.setPaddingX !== undefined) {
-				newEditor.setPaddingX(this.defaultEditor.getPaddingX());
-			}
-
-			// Set autocomplete if supported
 			if (newEditor.setAutocompleteProvider && this.autocompleteProvider) {
 				newEditor.setAutocompleteProvider(this.autocompleteProvider);
 			}
+			if (newEditor.setVimModeEnabled && this.defaultEditor.isVimModeEnabled()) {
+				newEditor.setVimModeEnabled(true);
+			}
 
-			// If extending CustomEditor, copy app-level handlers
-			// Use duck typing since instanceof fails across jiti module boundaries
-			const customEditor = newEditor as unknown as Record<string, unknown>;
-			if ("actionHandlers" in customEditor && customEditor.actionHandlers instanceof Map) {
-				if (!customEditor.onEscape) {
-					customEditor.onEscape = () => this.defaultEditor.onEscape?.();
-				}
-				if (!customEditor.onCtrlD) {
-					customEditor.onCtrlD = () => this.defaultEditor.onCtrlD?.();
-				}
-				if (!customEditor.onPasteImage) {
-					customEditor.onPasteImage = () => this.defaultEditor.onPasteImage?.();
-				}
-				if (!customEditor.onExtensionShortcut) {
-					customEditor.onExtensionShortcut = (data: string) => this.defaultEditor.onExtensionShortcut?.(data);
-				}
-				// Copy action handlers (clear, suspend, model switching, etc.)
+			const customEditor = newEditor as unknown as Partial<CustomEditor>;
+			if (customEditor.actionHandlers instanceof Map) {
+				customEditor.onEscape ??= () => this.defaultEditor.onEscape?.();
+				customEditor.onCtrlD ??= () => this.defaultEditor.onCtrlD?.();
+				customEditor.onPasteImage ??= () => this.defaultEditor.onPasteImage?.();
+				customEditor.onExtensionShortcut ??= (data: string) =>
+					this.defaultEditor.onExtensionShortcut?.(data) ?? false;
 				for (const [action, handler] of this.defaultEditor.actionHandlers) {
-					(customEditor.actionHandlers as Map<string, () => void>).set(action, handler);
+					customEditor.actionHandlers.set(action, handler);
 				}
 			}
 
 			this.editor = newEditor;
 		} else {
-			// Restore default editor with text from custom editor
 			this.defaultEditor.setText(currentText);
 			this.editor = this.defaultEditor;
 		}
@@ -2373,12 +2364,15 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
 		this.defaultEditor.onAction("app.editor.external", () => this.openExternalEditor());
+		this.defaultEditor.onAction("app.editor.vimToggle", () => this.toggleVimMode());
+		this.defaultEditor.onAction("app.history.search", () => this.showHistorySearch());
 		this.defaultEditor.onAction("app.message.followUp", () => this.handleFollowUp());
 		this.defaultEditor.onAction("app.message.dequeue", () => this.handleDequeue());
 		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
+		this.defaultEditor.onAction("app.mode.yoloToggle", () => this.toggleYoloMode());
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -2562,6 +2556,26 @@ export class InteractiveMode {
 			if (text === "/permissions") {
 				this.editor.setText("");
 				await this.handlePermissionsCommand();
+				return;
+			}
+			if (text === "/yolo") {
+				this.editor.setText("");
+				this.toggleYoloMode();
+				return;
+			}
+			if (text === "/vim") {
+				this.editor.setText("");
+				this.toggleVimMode();
+				return;
+			}
+			if (text === "/btw" || text.startsWith("/btw ")) {
+				this.editor.setText("");
+				await this.handleBtwCommand(text.startsWith("/btw ") ? text.slice(5).trim() : "");
+				return;
+			}
+			if (text === "/search") {
+				this.editor.setText("");
+				this.showHistorySearch();
 				return;
 			}
 			if (text === "/plan" || text.startsWith("/plan ")) {
@@ -3406,6 +3420,29 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private toggleYoloMode(): void {
+		const enabled = !this.session.yoloPermissionsEnabled;
+		this.session.setYoloPermissionsEnabled(enabled);
+		this.footer.invalidate();
+		this.ui.requestRender();
+		if (enabled) {
+			this.showWarning("YOLO permissions enabled for this session. Critical-deny rules still apply.");
+		} else {
+			this.showStatus("YOLO permissions disabled.");
+		}
+	}
+
+	private toggleVimMode(): void {
+		const enabled = !(this.editor.isVimModeEnabled?.() ?? false);
+		this.editor.setVimModeEnabled?.(enabled);
+		this.settingsManager.setVimModeEnabled(enabled);
+		this.footer.invalidate();
+		this.ui.requestRender();
+		this.showStatus(
+			enabled ? "Vim input mode enabled. Press Esc for NORMAL, i for INSERT." : "Vim input mode disabled.",
+		);
+	}
+
 	private cycleThinkingLevel(): void {
 		const newLevel = this.session.cycleThinkingLevel();
 		if (newLevel === undefined) {
@@ -3815,6 +3852,27 @@ export class InteractiveMode {
 		this.editorContainer.addChild(component);
 		this.ui.setFocus(focus);
 		this.ui.requestRender();
+	}
+
+	private showHistorySearch(): void {
+		const history = this.editor.getHistory?.() ?? this.defaultEditor.getHistory();
+		if (history.length === 0) {
+			this.showStatus("No prompt history yet");
+			return;
+		}
+		this.showSelector((done) => {
+			const selector = new HistorySearchSelectorComponent(
+				this.ui,
+				history,
+				(prompt) => {
+					done();
+					this.editor.setText(prompt);
+					this.ui.requestRender();
+				},
+				done,
+			);
+			return { component: selector, focus: selector };
+		});
 	}
 
 	private showSettingsSelector(): void {
@@ -5614,6 +5672,57 @@ export class InteractiveMode {
 		lines.push("─".repeat(50));
 		lines.push("Use /permissions to view. Edit files directly to add/remove rules.");
 		this.showStatus(lines.join("\n"));
+	}
+
+	private async handleBtwCommand(question: string): Promise<void> {
+		if (!question) {
+			this.showWarning("Usage: /btw <question>");
+			return;
+		}
+		const model = this.session.model;
+		if (!model) {
+			this.showError(formatNoModelSelectedMessage());
+			return;
+		}
+		const auth = await this.session.modelRegistry.getApiKeyAndHeaders(model);
+		if (!auth.ok || !auth.apiKey) {
+			this.showError(auth.ok ? formatNoApiKeyFoundMessage(model.provider) : auth.error);
+			return;
+		}
+		this.showStatus("BTW: asking side question...");
+		try {
+			const contextMessages = this.session.state.messages.filter(
+				(message): message is Message =>
+					message.role === "user" || message.role === "assistant" || message.role === "toolResult",
+			);
+			const messages: Message[] = [
+				...contextMessages,
+				{
+					role: "user",
+					content: `Answer this side question briefly. Do not assume it should affect the ongoing task.\n\n${question}`,
+					timestamp: Date.now(),
+				},
+			];
+			const response = await completeSimple(
+				model,
+				{
+					systemPrompt: this.session.systemPrompt,
+					messages,
+				},
+				{
+					apiKey: auth.apiKey,
+					headers: auth.headers,
+					reasoning: this.session.thinkingLevel === "off" ? undefined : this.session.thinkingLevel,
+				},
+			);
+			const text = response.content
+				.filter((part) => part.type === "text")
+				.map((part) => part.text)
+				.join("");
+			this.showStatus(`BTW answer:\n${text.trim() || "(no text response)"}`);
+		} catch (error) {
+			this.showError(`/btw failed: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	// =========================================================================

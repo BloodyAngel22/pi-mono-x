@@ -23,6 +23,8 @@ export interface AppKeybindings {
 	"app.thinking.toggle": true;
 	"app.session.toggleNamedFilter": true;
 	"app.editor.external": true;
+	"app.editor.vimToggle": true;
+	"app.history.search": true;
 	"app.message.followUp": true;
 	"app.message.dequeue": true;
 	"app.clipboard.pasteImage": true;
@@ -53,6 +55,7 @@ export interface AppKeybindings {
 	"app.tree.filter.cycleForward": true;
 	"app.tree.filter.cycleBackward": true;
 	"app.mode.planToggle": true;
+	"app.mode.yoloToggle": true;
 	"app.tasks.show": true;
 }
 
@@ -96,6 +99,14 @@ export const KEYBINDINGS = {
 	"app.editor.external": {
 		defaultKeys: "ctrl+g",
 		description: "Open external editor",
+	},
+	"app.editor.vimToggle": {
+		defaultKeys: [],
+		description: "Toggle Vim input mode",
+	},
+	"app.history.search": {
+		defaultKeys: "ctrl+f",
+		description: "Search prompt history",
 	},
 	"app.message.followUp": {
 		defaultKeys: "alt+enter",
@@ -200,6 +211,10 @@ export const KEYBINDINGS = {
 	"app.mode.planToggle": {
 		defaultKeys: [],
 		description: "Toggle plan mode (no code execution, agent writes a plan file)",
+	},
+	"app.mode.yoloToggle": {
+		defaultKeys: [],
+		description: "Toggle session-only YOLO permissions mode",
 	},
 	"app.tasks.show": {
 		defaultKeys: [],
