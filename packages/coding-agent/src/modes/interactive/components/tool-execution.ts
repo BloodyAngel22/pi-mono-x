@@ -217,6 +217,18 @@ export class ToolExecutionComponent extends Container {
 		this.updateDisplay();
 	}
 
+	getArgs(): unknown {
+		return this.args;
+	}
+
+	getResultText(): string {
+		return this.getTextOutput();
+	}
+
+	getIsError(): boolean {
+		return this.result?.isError ?? false;
+	}
+
 	override invalidate(): void {
 		super.invalidate();
 		this.updateDisplay();

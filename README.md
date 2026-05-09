@@ -69,11 +69,10 @@ mcpTools: [searxng_*, context7_*]
 
 ### File Checkpointing
 
-До того как агент изменяет файл (`write` / `edit`), оригинал автоматически копируется в `/tmp/.pi/checkpoints/<session-id>/`. В любой момент:
+До того как агент изменяет файл (`write` / `edit`), состояние файла автоматически сохраняется в `~/.pi/agent/checkpoints/<session-id>/`. В любой момент:
 
 - `/checkpoint` — показать список изменённых и созданных файлов
-- `/undo` — открывает интерактивный селектор: откатить **все** файлы сразу или выбрать конкретный
-- `/redo` — вернуть версию агента обратно после `/undo`
+- `/tree` или `/rewind` — восстановить код к выбранному состоянию сессии
 
 Подробнее: [docs/file-checkpointing.md](packages/coding-agent/docs/file-checkpointing.md)
 
@@ -196,7 +195,7 @@ export ANTHROPIC_API_KEY="sk-..."
 | **[MCP-серверы](docs/mcp.md)** | Подключение context7, searxng, ddg-search, serena и других |
 | **[Темы](docs/themes.md)** | Создание кастомных цветовых тем |
 | **[Суб-агенты](packages/coding-agent/docs/subagents.md)** | Система делегирования задач и кастомные агенты |
-| **[File Checkpointing](packages/coding-agent/docs/file-checkpointing.md)** | Автоматические снапшоты файлов + `/undo` и `/checkpoint` |
+| **[File Checkpointing](packages/coding-agent/docs/file-checkpointing.md)** | Автоматические снапшоты файлов + восстановление через `/tree`/`/rewind` |
 | **[Markdown Commands](packages/coding-agent/docs/markdown-commands.md)** | Slash-команды из `.md`-файлов с опциональным ограничением инструментов и модели |
 | **[Shell Hooks](packages/coding-agent/docs/hooks.md)** | Shell-скрипты на события агента (`agent_end`, `turn_end` и др.) |
 | **[Провайдеры](packages/coding-agent/docs/providers.md)** | Настройка API-ключей и провайдеров |

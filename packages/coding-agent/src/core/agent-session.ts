@@ -338,6 +338,7 @@ export class AgentSession {
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+		this._fileCheckpoint = FileCheckpoint.tryLoadFromDisk(this.sessionId);
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -545,16 +546,17 @@ export class AgentSession {
 		if (!result) return undefined; // dismissed — allow
 
 		const { decision, scope } = result;
+		const match = result.match ?? value;
 
 		if (decision === "allow-always") {
-			pm.addRule({ type, match: value, policy: "allow" }, scope ?? "local");
+			pm.addRule({ type, match, policy: "allow" }, scope ?? "local");
 			return undefined;
 		}
 		if (decision === "allow-once") {
 			return undefined;
 		}
 		if (decision === "deny-always") {
-			pm.addRule({ type, match: value, policy: "deny" }, scope ?? "local");
+			pm.addRule({ type, match, policy: "deny" }, scope ?? "local");
 		}
 		// deny-once or deny-always
 		return {
@@ -807,6 +809,15 @@ export class AgentSession {
 		return undefined;
 	}
 
+	private _countAssistantTurnsInCurrentBranch(): number {
+		let count = 0;
+		for (const entry of this.sessionManager.getBranch()) {
+			if (entry.type !== "message") continue;
+			if (entry.message.role === "assistant") count++;
+		}
+		return count;
+	}
+
 	/** Run shell hooks for an event name, forwarding relevant data. */
 	private _runHooks(eventName: HookEventName, data: Record<string, unknown>): void {
 		const hooks = this._resourceLoader.getHooks().hooks;
@@ -817,7 +828,7 @@ export class AgentSession {
 	/** Emit extension events based on agent events */
 	private async _emitExtensionEvent(event: AgentEvent): Promise<void> {
 		if (event.type === "agent_start") {
-			this._turnIndex = 0;
+			this._turnIndex = this._countAssistantTurnsInCurrentBranch();
 			await this._extensionRunner.emit({ type: "agent_start" });
 			this._runHooks("agent_start", { type: "agent_start", cwd: this._cwd });
 		} else if (event.type === "agent_end") {
@@ -838,6 +849,7 @@ export class AgentSession {
 				message: event.message,
 				toolResults: event.toolResults,
 			};
+			await this._fileCheckpoint?.captureTurnEnd(this._turnIndex);
 			await this._extensionRunner.emit(extensionEvent);
 			this._runHooks("turn_end", { type: "turn_end", turnIndex: this._turnIndex });
 			this._turnIndex++;
@@ -879,7 +891,7 @@ export class AgentSession {
 					if (!this._fileCheckpoint) {
 						this._fileCheckpoint = new FileCheckpoint(this.sessionId);
 					}
-					void this._fileCheckpoint.snapshotBeforeWrite(filePath);
+					void this._fileCheckpoint.snapshotBeforeWrite(filePath, this._turnIndex);
 				}
 			}
 		} else if (event.type === "tool_execution_update") {
@@ -1099,56 +1111,20 @@ export class AgentSession {
 	}
 
 	/**
-	 * Restore all files written/edited by the agent in this session to their
-	 * pre-session state. Returns a summary of what was restored or deleted.
-	 * Returns null if no files were tracked (nothing to undo).
-	 */
-	async undoFileChanges(): Promise<RestoreResult | null> {
-		if (!this._fileCheckpoint?.hasChanges) return null;
-		return this._fileCheckpoint.restore();
-	}
-
-	/**
-	 * Restore a single tracked file to its pre-session state.
-	 * Returns null if the file is not tracked.
-	 */
-	async undoFileChange(filePath: string): Promise<RestoreResult | null> {
-		return this._fileCheckpoint?.restoreFile(filePath) ?? null;
-	}
-
-	/**
-	 * Reapply all agent changes that were removed by the last undoFileChanges() call.
-	 * Returns null if there is nothing to redo.
-	 */
-	async redoFileChanges(): Promise<RestoreResult | null> {
-		return this._fileCheckpoint?.redo() ?? null;
-	}
-
-	/**
-	 * Reapply the agent's change for a single file that was previously undone.
-	 * Returns null if there is no redo state for this file.
-	 */
-	async redoFileChange(filePath: string): Promise<RestoreResult | null> {
-		return this._fileCheckpoint?.redoFile(filePath) ?? null;
-	}
-
-	/** True if a previous undo can be reapplied. */
-	get hasFileRedo(): boolean {
-		return this._fileCheckpoint?.hasRedo ?? false;
-	}
-
-	/** Absolute paths that have redo state available. */
-	getFileRedoPaths(): string[] {
-		return this._fileCheckpoint?.redoPaths ?? [];
-	}
-
-	/**
 	 * Returns the current file checkpoint status: lists of modified and newly
 	 * created files. Returns null if no changes have been tracked yet.
 	 */
 	getFileCheckpointStatus(): { modified: string[]; created: string[] } | null {
 		if (!this._fileCheckpoint?.hasChanges) return null;
 		return this._fileCheckpoint.getStatus();
+	}
+
+	getFileCheckpointTurnStatus(turnIndex: number): { modified: string[]; created: string[] } | null {
+		return this._fileCheckpoint?.getTurnStatus(turnIndex) ?? null;
+	}
+
+	async restoreFileChangesToTurn(turnIndex: number): Promise<RestoreResult | null> {
+		return this._fileCheckpoint?.restoreToTurn(turnIndex) ?? null;
 	}
 
 	private _normalizePromptSnippet(text: string | undefined): string | undefined {

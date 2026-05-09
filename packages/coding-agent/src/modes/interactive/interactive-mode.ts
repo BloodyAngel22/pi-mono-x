@@ -110,6 +110,7 @@ import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import { LoginDialogComponent } from "./components/login-dialog.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
 import { type AuthSelectorProvider, OAuthSelectorComponent } from "./components/oauth-selector.js";
+import { PlanTodoWidgetComponent } from "./components/plan-todo-widget.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
@@ -313,6 +314,7 @@ export class InteractiveMode {
 	private extensionWidgetsBelow = new Map<string, Component & { dispose?(): void }>();
 	private widgetContainerAbove!: Container;
 	private widgetContainerBelow!: Container;
+	private planTodoWidget: PlanTodoWidgetComponent | undefined;
 
 	// Custom footer from extension (undefined = use built-in footer)
 	private customFooter: (Component & { dispose?(): void }) | undefined = undefined;
@@ -1761,6 +1763,45 @@ export class InteractiveMode {
 		this.renderWidgets();
 	}
 
+	private activatePlanTodoWidget(): void {
+		const tasks = this.session.planMode.getTasks();
+		if (tasks.length === 0) return;
+		this.planTodoWidget = new PlanTodoWidgetComponent(
+			tasks,
+			theme,
+			() => this.getPlanTodoTokenCount(),
+			() => this.ui.requestRender(),
+		);
+		this.extensionWidgetsBelow.set("__plan-todos", this.planTodoWidget);
+		this.renderWidgets();
+	}
+
+	private syncPlanTodoWidget(): void {
+		if (!this.planTodoWidget) return;
+		const tasks = this.session.planMode.getTasks();
+		if (tasks.length === 0) {
+			this.planTodoWidget.dispose();
+			this.extensionWidgetsBelow.delete("__plan-todos");
+			this.planTodoWidget = undefined;
+			this.renderWidgets();
+			return;
+		}
+		this.planTodoWidget.update(tasks);
+		this.renderWidgets();
+	}
+
+	private getPlanTodoTokenCount(): number {
+		let total = 0;
+		for (const entry of this.session.sessionManager.getEntries()) {
+			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+			total += entry.message.usage.input + entry.message.usage.output;
+		}
+		return total;
+	}
+
+	/**
+	 * Clear all extension UI modifications (status, widgets, footer, working indicator, hidden thinking label, autocomplete wrappers).
+	 */
 	private clearExtensionWidgets(): void {
 		for (const widget of this.extensionWidgetsAbove.values()) {
 			widget.dispose?.();
@@ -1770,6 +1811,7 @@ export class InteractiveMode {
 		}
 		this.extensionWidgetsAbove.clear();
 		this.extensionWidgetsBelow.clear();
+		this.planTodoWidget = undefined;
 		this.renderWidgets();
 	}
 
@@ -2482,7 +2524,7 @@ export class InteractiveMode {
 				await this.handleCloneCommand();
 				return;
 			}
-			if (text === "/tree") {
+			if (text === "/tree" || text === "/rewind") {
 				this.showTreeSelector();
 				this.editor.setText("");
 				return;
@@ -2586,16 +2628,6 @@ export class InteractiveMode {
 			if (text === "/execute") {
 				this.editor.setText("");
 				await this.handleExecuteCommand();
-				return;
-			}
-			if (text === "/undo") {
-				this.editor.setText("");
-				await this.handleUndoCommand();
-				return;
-			}
-			if (text === "/redo") {
-				this.editor.setText("");
-				await this.handleRedoCommand();
 				return;
 			}
 			if (text === "/checkpoint") {
@@ -2849,6 +2881,7 @@ export class InteractiveMode {
 				if (component) {
 					component.updateResult({ ...event.result, isError: event.isError });
 					this.pendingTools.delete(event.toolCallId);
+					this.syncPlanTodoWidget();
 					if (this.pendingTools.size === 0) {
 						this.setWorkingMessage();
 					}
@@ -2864,7 +2897,7 @@ export class InteractiveMode {
 				this.footer.stopTask();
 				this.stopWorkingLoader();
 				if (this.currentTaskBlock) {
-					this.currentTaskBlock.finalize(this.pendingTools.size > 0);
+					this.currentTaskBlock.finalize(this.pendingTools.size > 0, this.currentTaskBlock.buildSummary());
 					this.currentTaskBlock = undefined;
 				}
 				if (this.streamingComponent) {
@@ -2873,6 +2906,7 @@ export class InteractiveMode {
 					this.streamingMessage = undefined;
 				}
 				this.pendingTools.clear();
+				this.syncPlanTodoWidget();
 
 				await this.checkShutdownRequested();
 
@@ -4224,6 +4258,16 @@ export class InteractiveMode {
 		});
 	}
 
+	private getTurnIndexForTreeEntry(entryId: string): number {
+		let turnIndex = 0;
+		for (const entry of this.sessionManager.getBranch(entryId)) {
+			if (entry.type !== "message") continue;
+			if (entry.message.role !== "assistant") continue;
+			turnIndex++;
+		}
+		return turnIndex;
+	}
+
 	private showUserMessageSelector(): void {
 		const userMessages = this.session.getUserMessagesForForking();
 
@@ -4310,8 +4354,28 @@ export class InteractiveMode {
 						return;
 					}
 
-					// Ask about summarization
 					done(); // Close selector first
+					const actionChoice = await this.showExtensionSelector("Tree action:", [
+						"Navigate",
+						"Restore code only",
+						"Restore code + navigate",
+					]);
+					if (actionChoice === undefined) {
+						this.showTreeSelector(entryId);
+						return;
+					}
+					if (actionChoice === "Restore code only" || actionChoice === "Restore code + navigate") {
+						const turnIndex = this.getTurnIndexForTreeEntry(entryId);
+						const result = await this.session.restoreFileChangesToTurn(turnIndex);
+						if (result) {
+							this._showRestoreResult(result);
+						} else {
+							this.showStatus("No file changes tracked for this point.");
+						}
+						if (actionChoice === "Restore code only") {
+							return;
+						}
+					}
 
 					// Loop until user makes a complete choice or cancels to tree
 					let wantsSummary = false;
@@ -5754,6 +5818,7 @@ export class InteractiveMode {
 		const executeMessage = planMode.buildExecuteMessage();
 		planMode.exit();
 		this.footerDataProvider.setExtensionStatus("plan-mode", undefined);
+		this.activatePlanTodoWidget();
 		this.showStatus("Plan mode ended. Starting execution.");
 		this.ui.requestRender();
 		if (executeMessage) {
@@ -5766,52 +5831,10 @@ export class InteractiveMode {
 	}
 
 	// =========================================================================
-	// Checkpoint / undo commands
+	// Checkpoint commands
 	// =========================================================================
 
-	private async handleUndoCommand(): Promise<void> {
-		if (this.session.isStreaming) {
-			this.showWarning("Wait for the current response to finish before undoing changes.");
-			return;
-		}
-		const status = this.session.getFileCheckpointStatus();
-		if (!status) {
-			this.showStatus("Nothing to undo — no file changes tracked in this session.");
-			return;
-		}
-
-		const total = status.modified.length + status.created.length;
-		const allLabel = `All files (${total})`;
-
-		const choices: string[] = [allLabel];
-		for (const f of status.modified) choices.push(`  modified  ${this.shortPath(f)}`);
-		for (const f of status.created) choices.push(`  created   ${this.shortPath(f)}`);
-
-		const choice = await this.showExtensionSelectorAsync("Undo which files?", choices);
-		if (!choice) return;
-
-		if (choice === allLabel) {
-			const result = await this.session.undoFileChanges();
-			if (!result) {
-				this.showStatus("Nothing to undo.");
-				return;
-			}
-			this._showUndoResult(result);
-		} else {
-			// Extract the absolute path from the choice label (trim leading spaces and tag)
-			const rawPath = choice.replace(/^\s+(modified|created)\s+/, "").trim();
-			// Resolve back to absolute path if shortPath replaced home with ~
-			const absPath = rawPath.startsWith("~") ? path.join(os.homedir(), rawPath.slice(1)) : rawPath;
-			const result = await this.session.undoFileChange(absPath);
-			if (!result) {
-				this.showWarning(`File not tracked: ${rawPath}`);
-				return;
-			}
-			this._showUndoResult(result);
-		}
-	}
-
-	private _showUndoResult(result: RestoreResult): void {
+	private _showRestoreResult(result: RestoreResult): void {
 		const lines: string[] = [];
 		if (result.restored.length > 0) {
 			lines.push(`Restored (${result.restored.length}):`);
@@ -5829,44 +5852,6 @@ export class InteractiveMode {
 		this.showStatus(lines.join("\n"));
 	}
 
-	private async handleRedoCommand(): Promise<void> {
-		if (this.session.isStreaming) {
-			this.showWarning("Wait for the current response to finish before redoing changes.");
-			return;
-		}
-		if (!this.session.hasFileRedo) {
-			this.showStatus("Nothing to redo — run /undo first.");
-			return;
-		}
-
-		const redoPaths = this.session.getFileRedoPaths();
-
-		if (redoPaths.length > 1) {
-			const allLabel = `All files (${redoPaths.length})`;
-			const choices: string[] = [allLabel, ...redoPaths.map((f) => `  ${this.shortPath(f)}`)];
-
-			const choice = await this.showExtensionSelectorAsync("Redo which files?", choices);
-			if (!choice) return;
-
-			if (choice === allLabel) {
-				const result = await this.session.redoFileChanges();
-				if (result) this._showUndoResult(result);
-			} else {
-				const rawPath = choice.trim();
-				const absPath = rawPath.startsWith("~") ? path.join(os.homedir(), rawPath.slice(1)) : rawPath;
-				const result = await this.session.redoFileChange(absPath);
-				if (!result) {
-					this.showWarning(`No redo state for: ${rawPath}`);
-					return;
-				}
-				this._showUndoResult(result);
-			}
-		} else {
-			const result = await this.session.redoFileChanges();
-			if (result) this._showUndoResult(result);
-		}
-	}
-
 	private handleCheckpointCommand(): void {
 		const status = this.session.getFileCheckpointStatus();
 		if (!status) {
@@ -5882,7 +5867,7 @@ export class InteractiveMode {
 			lines.push(`Created (${status.created.length}):`);
 			for (const f of status.created) lines.push(`  ${this.shortPath(f)}`);
 		}
-		lines.push("\nUse /undo to revert all these changes.");
+		lines.push("\nUse /tree or /rewind to restore code to a previous session state.");
 		this.showStatus(lines.join("\n"));
 	}
 
@@ -5900,15 +5885,24 @@ export class InteractiveMode {
 
 			const title = `Permission required`;
 			const message = `${typeLabel}: ${detail}`;
-			const choices = [`Allow once`, `Allow always (save rule)`, `Deny once`, `Deny always (save rule)`];
+			const choices = [
+				`Allow once`,
+				`Allow for session`,
+				`Allow and save rule`,
+				`Deny once`,
+				`Deny and save rule`,
+				`More options`,
+			];
 			const choice = await this.showExtensionSelectorAsync(`${title}\n${message}`, choices);
 			if (!choice) return null;
 
 			if (choice === "Allow once") return { decision: "allow-once" as const };
 			if (choice === "Deny once") return { decision: "deny-once" as const };
+			if (choice === "Allow for session") return { decision: "allow-always" as const, scope: "session" as const };
+			if (choice === "More options") return this.showAdvancedPermissionOptions(info);
 
 			// For "always" decisions, ask where to save the rule
-			const decision = choice === "Allow always (save rule)" ? ("allow-always" as const) : ("deny-always" as const);
+			const decision = choice === "Allow and save rule" ? ("allow-always" as const) : ("deny-always" as const);
 			const scopeChoices = [
 				`Current project (.pi/permissions.json)`,
 				`Global (~/.pi/agent/permissions.json)`,
@@ -5925,6 +5919,76 @@ export class InteractiveMode {
 
 			return { decision, scope };
 		};
+	}
+
+	private async showAdvancedPermissionOptions(info: { type: "bash" | "file" | "mcp"; value: string }): Promise<{
+		decision: "allow-once" | "allow-always" | "deny-once" | "deny-always";
+		scope?: "local" | "global" | "session";
+		match?: string;
+	} | null> {
+		const decisionChoice = await this.showExtensionSelectorAsync("Advanced permission action:", [
+			"Allow",
+			"Deny",
+			"Cancel",
+		]);
+		if (!decisionChoice || decisionChoice === "Cancel") return null;
+
+		const scopeChoice = await this.showExtensionSelectorAsync("How long?", [
+			"Once",
+			"This session only",
+			"Save to current project",
+			"Save globally",
+		]);
+		if (!scopeChoice) return null;
+
+		const persistent = scopeChoice !== "Once";
+		const decision =
+			decisionChoice === "Allow"
+				? persistent
+					? ("allow-always" as const)
+					: ("allow-once" as const)
+				: persistent
+					? ("deny-always" as const)
+					: ("deny-once" as const);
+		if (!persistent) return { decision };
+
+		let scope: "local" | "global" | "session";
+		if (scopeChoice === "Save globally") scope = "global";
+		else if (scopeChoice === "This session only") scope = "session";
+		else scope = "local";
+
+		const match = await this.selectAdvancedPermissionMatch(info);
+		if (!match) return { decision, scope };
+		return { decision, scope, match };
+	}
+
+	private async selectAdvancedPermissionMatch(info: {
+		type: "bash" | "file" | "mcp";
+		value: string;
+	}): Promise<string | undefined> {
+		if (info.type === "file") {
+			const fileName = path.basename(info.value);
+			const ext = path.extname(info.value);
+			const dir = path.dirname(info.value);
+			const choices = [
+				`Exact file (${fileName})`,
+				`Directory (${this.shortPath(dir)}/*)`,
+				`File type (*${ext || ".*"})`,
+			];
+			const choice = await this.showExtensionSelectorAsync("Apply rule to:", choices);
+			if (!choice) return undefined;
+			if (choice.startsWith("Directory")) return path.join(dir, "*");
+			if (choice.startsWith("File type") && ext) return `*${ext}`;
+			return info.value;
+		}
+		if (info.type === "bash") {
+			const firstWord = info.value.trim().split(/\s+/)[0];
+			const choices = [`Exact command`, firstWord ? `Command family (${firstWord} *)` : "Command family"];
+			const choice = await this.showExtensionSelectorAsync("Apply rule to:", choices);
+			if (!choice || choice === "Exact command" || !firstWord) return info.value;
+			return `${firstWord} *`;
+		}
+		return info.value;
 	}
 
 	private showExtensionSelectorAsync(title: string, options: string[]): Promise<string | undefined> {

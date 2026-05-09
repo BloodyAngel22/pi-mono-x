@@ -4,6 +4,7 @@ import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provi
 import { theme } from "../theme/theme.js";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const CONTEXT_BAR_WIDTH = 10;
 
 function formatTaskElapsed(startTime: number): string {
 	const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -32,6 +33,15 @@ function formatTokens(count: number): string {
 	if (count < 1000000) return `${Math.round(count / 1000)}k`;
 	if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
 	return `${Math.round(count / 1000000)}M`;
+}
+
+function formatContextBar(percent: number | null): string {
+	if (percent === null) {
+		return `[${"?".repeat(CONTEXT_BAR_WIDTH)}]`;
+	}
+	const clamped = Math.max(0, Math.min(100, percent));
+	const filled = Math.round((clamped / 100) * CONTEXT_BAR_WIDTH);
+	return `[${"█".repeat(filled)}${"░".repeat(CONTEXT_BAR_WIDTH - filled)}]`;
 }
 
 /**
@@ -179,10 +189,11 @@ export class FooterComponent implements Component {
 		// Colorize context percentage based on usage
 		let contextPercentStr: string;
 		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
+		const contextBar = formatContextBar(contextUsage?.percent ?? null);
 		const contextPercentDisplay =
 			contextPercent === "?"
-				? `?/${formatTokens(contextWindow)}${autoIndicator}`
-				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
+				? `${contextBar} ?/${formatTokens(contextWindow)}${autoIndicator}`
+				: `${contextBar} ${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
 		if (contextPercentValue > 90) {
 			contextPercentStr = theme.fg("error", contextPercentDisplay);
 		} else if (contextPercentValue > 70) {

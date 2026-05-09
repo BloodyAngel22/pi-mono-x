@@ -69,6 +69,7 @@ export type PermissionScope = "local" | "global" | "session";
 export interface PermissionDecisionResult {
 	decision: PermissionDecision;
 	scope?: PermissionScope;
+	match?: string;
 }
 
 export interface PermissionCheckInfo {

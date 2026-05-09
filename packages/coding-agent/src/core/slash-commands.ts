@@ -30,6 +30,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "fork", description: "Create a new fork from a previous user message" },
 	{ name: "clone", description: "Duplicate the current session at the current position" },
 	{ name: "tree", description: "Navigate session tree (switch branches)" },
+	{ name: "rewind", description: "Navigate session tree with code restore options" },
 	{ name: "login", description: "Configure provider authentication" },
 	{ name: "logout", description: "Remove provider authentication" },
 	{ name: "new", description: "Start a new session" },
@@ -50,7 +51,5 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Enter planning mode (agent writes a plan, no code execution). Example: /plan refactor auth",
 	},
 	{ name: "execute", description: "Exit planning mode and execute the current plan" },
-	{ name: "undo", description: "Revert all file changes made by the agent in this session" },
-	{ name: "redo", description: "Reapply agent file changes that were reverted by /undo" },
 	{ name: "checkpoint", description: "Show files modified/created by the agent in this session" },
 ];

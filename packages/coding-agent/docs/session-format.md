@@ -290,13 +290,26 @@ Session metadata (e.g., user-defined display name). Set via `/name` command or `
 
 The session name is displayed in the session selector (`/resume`) instead of the first message when set.
 
+### SessionLeafEntry
+
+Internal marker for the current active tree position. Appended when `/tree` or `/rewind` moves the leaf without adding a normal session entry.
+
+```json
+{"type":"session_leaf","id":"l2m3n4o5","parentId":"a1b2c3d4","timestamp":"2024-12-03T14:40:00.000Z","targetId":"a1b2c3d4"}
+```
+
+Fields:
+- `targetId`: active leaf entry ID, or `null` for the root/before-first-entry position
+
+`SessionLeafEntry` is excluded from `getEntries()`, `getTree()`, and LLM context. It only persists the active branch across `/resume`, session switches, and pi restarts.
+
 ## Tree Structure
 
 Entries form a tree:
 - First entry has `parentId: null`
 - Each subsequent entry points to its parent via `parentId`
 - Branching creates new children from an earlier entry
-- The "leaf" is the current position in the tree
+- The "leaf" is the current position in the tree and is persisted with `SessionLeafEntry`
 
 ```
 [user msg] ─── [assistant] ─── [user msg] ─── [assistant] ─┬─ [user msg] ← current leaf

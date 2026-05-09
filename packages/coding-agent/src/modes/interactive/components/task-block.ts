@@ -9,6 +9,31 @@ function formatElapsed(startMs: number, endMs?: number): string {
 	return `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
 }
 
+export interface TaskBlockSummary {
+	filesChanged: number;
+	commandsRun: number;
+	testsPassed?: number;
+	testsFailed?: number;
+}
+
+function getStringArg(args: unknown, key: string): string | undefined {
+	if (!args || typeof args !== "object") return undefined;
+	const value = (args as Record<string, unknown>)[key];
+	return typeof value === "string" ? value : undefined;
+}
+
+function parseTestCounts(
+	command: string | undefined,
+	output: string,
+): { passed?: number; failed?: number } | undefined {
+	const haystack = `${command ?? ""}\n${output}`;
+	if (!/\b(test|pytest|vitest|jest|mocha)\b/i.test(haystack)) return undefined;
+	const passed = [...output.matchAll(/(\d+)\s+passed/gi)].reduce((sum, match) => sum + Number(match[1]), 0);
+	const failed = [...output.matchAll(/(\d+)\s+failed/gi)].reduce((sum, match) => sum + Number(match[1]), 0);
+	if (passed === 0 && failed === 0) return undefined;
+	return { passed, failed };
+}
+
 /**
  * Groups consecutive tool calls under a compact block, à la claude-code.
  *
@@ -24,6 +49,7 @@ export class TaskBlockComponent extends Container {
 	private endTime: number | undefined;
 	private done = false;
 	private hasError = false;
+	private summary: TaskBlockSummary | undefined;
 	private intervalId: NodeJS.Timeout | null = null;
 	private ui: TUI;
 
@@ -60,9 +86,10 @@ export class TaskBlockComponent extends Container {
 	}
 
 	/** Mark block as complete. Stops the elapsed timer. */
-	finalize(isError = false): void {
+	finalize(isError = false, summary?: TaskBlockSummary): void {
 		this.done = true;
 		this.hasError = isError;
+		this.summary = summary;
 		this.endTime = Date.now();
 		if (this.intervalId) {
 			clearInterval(this.intervalId);
@@ -88,6 +115,38 @@ export class TaskBlockComponent extends Container {
 		}
 	}
 
+	buildSummary(): TaskBlockSummary | undefined {
+		const changedFiles = new Set<string>();
+		let commandsRun = 0;
+		let testsPassed = 0;
+		let testsFailed = 0;
+		let sawTests = false;
+
+		for (const tool of this.tools) {
+			if (tool.toolName === "write" || tool.toolName === "edit") {
+				const filePath = getStringArg(tool.getArgs(), "path");
+				if (filePath) changedFiles.add(filePath);
+			}
+			if (tool.toolName === "bash") {
+				commandsRun++;
+				const counts = parseTestCounts(getStringArg(tool.getArgs(), "command"), tool.getResultText());
+				if (counts) {
+					sawTests = true;
+					testsPassed += counts.passed ?? 0;
+					testsFailed += counts.failed ?? 0;
+				}
+			}
+		}
+
+		if (changedFiles.size === 0 && commandsRun === 0 && !sawTests) return undefined;
+		return {
+			filesChanged: changedFiles.size,
+			commandsRun,
+			testsPassed: sawTests ? testsPassed : undefined,
+			testsFailed: sawTests ? testsFailed : undefined,
+		};
+	}
+
 	override invalidate(): void {
 		for (const tool of this.tools) {
 			tool.invalidate();
@@ -109,6 +168,23 @@ export class TaskBlockComponent extends Container {
 			}
 		}
 		return truncateToWidth(`${connector}◆ ${tool.toolName}`, width);
+	}
+
+	private formatSummary(): string | undefined {
+		if (!this.summary) return undefined;
+		const parts: string[] = [];
+		if (this.summary.filesChanged > 0) {
+			parts.push(`${this.summary.filesChanged} file${this.summary.filesChanged === 1 ? "" : "s"} changed`);
+		}
+		if (this.summary.commandsRun > 0) {
+			parts.push(`${this.summary.commandsRun} command${this.summary.commandsRun === 1 ? "" : "s"} run`);
+		}
+		if (this.summary.testsPassed !== undefined || this.summary.testsFailed !== undefined) {
+			const passed = this.summary.testsPassed ?? 0;
+			const failed = this.summary.testsFailed ?? 0;
+			parts.push(failed > 0 ? `tests: ${passed} passed, ${failed} failed` : `tests: ${passed} passed`);
+		}
+		return parts.length > 0 ? parts.join(" · ") : undefined;
 	}
 
 	override render(width: number): string[] {
@@ -155,6 +231,10 @@ export class TaskBlockComponent extends Container {
 				? theme.fg("error", `   · Failed in ${elapsed}`)
 				: theme.fg("dim", `   · Elapsed: ${elapsed}`);
 			lines.push(truncateToWidth(footer, width));
+			const summary = this.formatSummary();
+			if (summary) {
+				lines.push(truncateToWidth(theme.fg("dim", `   · ${summary}`), width));
+			}
 		}
 
 		return lines;

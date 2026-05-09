@@ -309,6 +309,63 @@ describe("SessionManager append and tree traversal", () => {
 			const branchedEntry = entries.find((e) => e.id === id3)!;
 			expect(branchedEntry.parentId).toBe(id1); // sibling of id2
 		});
+
+		it("persists selected leaf after reopening a branched session", () => {
+			const tempDir = join(tmpdir(), `session-leaf-marker-${Date.now()}`);
+			mkdirSync(tempDir, { recursive: true });
+
+			try {
+				const session = SessionManager.create(tempDir, tempDir);
+				const id1 = session.appendMessage(userMsg("first"));
+				session.appendMessage(assistantMsg("first answer"));
+				session.appendMessage(userMsg("second"));
+				const id4 = session.appendMessage(assistantMsg("second answer"));
+
+				session.branch(id1);
+				expect(session.getLeafId()).toBe(id1);
+
+				const sessionFile = session.getSessionFile();
+				expect(sessionFile).toBeDefined();
+				const fileContent = readFileSync(sessionFile!, "utf-8");
+				expect(fileContent).toContain('"type":"session_leaf"');
+				expect(fileContent).toContain(`"targetId":"${id1}"`);
+
+				const reopened = SessionManager.open(sessionFile!);
+				expect(reopened.getLeafId()).toBe(id1);
+				expect(reopened.getEntries().map((entry) => entry.id)).toEqual([
+					id1,
+					expect.any(String),
+					expect.any(String),
+					id4,
+				]);
+				expect(reopened.getTree()[0].entry.id).toBe(id1);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+
+		it("persists root leaf reset after reopening a session", () => {
+			const tempDir = join(tmpdir(), `session-root-leaf-marker-${Date.now()}`);
+			mkdirSync(tempDir, { recursive: true });
+
+			try {
+				const session = SessionManager.create(tempDir, tempDir);
+				session.appendMessage(userMsg("first"));
+				session.appendMessage(assistantMsg("first answer"));
+
+				session.resetLeaf();
+				expect(session.getLeafId()).toBeNull();
+
+				const sessionFile = session.getSessionFile();
+				expect(sessionFile).toBeDefined();
+
+				const reopened = SessionManager.open(sessionFile!);
+				expect(reopened.getLeafId()).toBeNull();
+				expect(reopened.buildSessionContext().messages).toEqual([]);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
 	});
 
 	describe("branchWithSummary", () => {

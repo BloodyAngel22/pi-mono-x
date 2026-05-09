@@ -5,7 +5,7 @@
  * The agent writes a structured plan file that gets passed as context when /execute is run.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -15,6 +15,12 @@ export interface PlanModeState {
 	active: boolean;
 	planFilePath: string | undefined;
 	planName: string | undefined;
+}
+
+export interface PlanTask {
+	text: string;
+	done: boolean;
+	level: number;
 }
 
 export class PlanMode {
@@ -126,7 +132,31 @@ If you are tempted to write code or edit a file, STOP. Write the intent into the
 	 */
 	buildExecuteMessage(): string {
 		if (!this._planFilePath) return "";
-		return `Execute the plan at \`${this._planFilePath}\`. Read the plan file first, then implement each task in order, checking them off as you complete them (update the status field to "executing" and then "done"). Ask me if you need clarification on any task.`;
+		return `Execute the plan at \`${this._planFilePath}\`. Read the plan file first, then implement each task in order, checking off each task in the plan file as you complete it (change [ ] to [x]) and update the status field to "executing" and then "done". Ask me if you need clarification on any task.`;
+	}
+
+	getTasks(): PlanTask[] {
+		if (!this._planFilePath || !existsSync(this._planFilePath)) return [];
+		const content = readFileSync(this._planFilePath, "utf-8");
+		const tasks: PlanTask[] = [];
+		let inTasksSection = false;
+		for (const line of content.split(/\r?\n/)) {
+			if (/^##\s/.test(line)) {
+				inTasksSection = /^##\s+tasks\b/i.test(line);
+				continue;
+			}
+			if (!inTasksSection) continue;
+			const match = line.match(/^(\s*)-\s+\[([ xX])\]\s+(.+)$/);
+			if (!match) continue;
+			const text = match[3]?.trim();
+			if (!text) continue;
+			tasks.push({
+				text,
+				done: match[2]?.toLowerCase() === "x",
+				level: Math.floor((match[1]?.length ?? 0) / 2),
+			});
+		}
+		return tasks;
 	}
 
 	private _createPlanFile(name?: string): string {

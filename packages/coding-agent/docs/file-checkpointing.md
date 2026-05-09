@@ -1,12 +1,13 @@
 # File Checkpointing
 
-Pi automatically snapshots every file before the agent modifies it for the first time in a session. This lets you undo all agent changes in a single command.
+Pi automatically snapshots files before the agent modifies them. These snapshots let `/tree` and `/rewind` restore the working tree to the code state associated with a selected session point.
 
 ## How it works
 
-1. When the agent calls `write` or `edit` on a file, pi copies the original to a temp directory (`/tmp/.pi/checkpoints/<session-id>/`) before the write happens.
-2. If the file did not exist (the agent is creating a new file), its path is recorded instead.
-3. Run `/undo` at any point to revert everything back to the pre-session state.
+1. When the agent calls `write` or `edit`, pi records the file state before that turn modifies it.
+2. If the file did not exist, pi records it as created by that turn.
+3. At the end of a turn, pi captures the resulting file state for later forward navigation.
+4. `/tree` and `/rewind` use those per-turn snapshots to restore code backward or forward to the selected session entry.
 
 > **Scope**: only `write` and `edit` tool calls are tracked. Changes made through `bash` (e.g. `sed -i`, `git checkout`) are not snapshotted.
 
@@ -23,61 +24,35 @@ Modified (2):
 Created (1):
   ~/project/src/new-feature.ts
 
-Use /undo to revert all these changes.
+Use /tree or /rewind to restore code to a previous session state.
 ```
 
-### `/undo`
+### `/tree` and `/rewind`
 
-Opens an interactive selector showing all tracked files. Choose a specific file or restore everything at once:
-
-```
-Undo which files?
-▶ All files (3)
-    modified  ~/project/src/app.ts
-    modified  ~/project/src/utils.ts
-    created   ~/project/src/new-feature.ts
-```
-
-Select **All files** to revert everything, or pick one entry to restore just that file.
-
-After confirming:
+Open the session tree selector. For a selected entry, choose:
 
 ```
-Restored (2):
-  ~/project/src/app.ts
-  ~/project/src/utils.ts
-Deleted (1):
-  ~/project/src/new-feature.ts
+Restore code only
+Restore code + navigate
 ```
 
-If the agent has not modified any files yet, `/undo` reports "Nothing to undo."
-
-### `/redo`
-
-Reapplies the agent's changes that were reverted by `/undo`. If multiple files were undone, opens a selector (same as `/undo`).
-
-```
-Restored (2):
-  ~/project/src/app.ts
-  ~/project/src/utils.ts
-```
-
-If `/undo` has not been run yet, `/redo` reports "Nothing to redo."
-
-> **Note**: the redo buffer is per-session and in-memory only. It is not persisted to disk and is cleared when pi exits.
+Both actions restore tracked files to the code state for that selected session point. Moving backward restores older code. Selecting a later tree entry restores the later code state again.
 
 ## Storage
 
 Snapshots are stored at:
 
 ```
-/tmp/.pi/checkpoints/<session-id>/
+~/.pi/agent/checkpoints/<session-id>/
   files/                 ← original file contents (mirroring absolute paths)
+  turns/                 ← pre-turn snapshots
+  turn-ends/             ← post-turn snapshots
   created.json           ← list of files created by the agent
+  turn-changes.json      ← per-turn modified/created file metadata
   meta.json              ← { createdAt }
 ```
 
-Temp files are cleaned up by the OS on reboot. They are not cleaned up automatically during a session, so `/undo` can be called multiple times or after a `/reload`.
+Checkpoint files are session-scoped and persistent, so code restore can be used after `/reload`, switching sessions, or restarting pi. Legacy checkpoints from `/tmp/.pi/checkpoints/<session-id>/` are still loaded if no persistent checkpoint exists.
 
 ## Limitations
 

@@ -29,7 +29,7 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 - [Keybindings](keybindings.md) - default shortcuts and custom keybindings.
 - [Sessions](sessions.md) - session management, branching, and tree navigation.
 - [Compaction](compaction.md) - context compaction and branch summarization.
-- [File checkpointing](file-checkpointing.md) - undo all agent file changes with `/undo`.
+- [File checkpointing](file-checkpointing.md) - restore code through `/tree` and `/rewind`.
 
 ## Customization
 

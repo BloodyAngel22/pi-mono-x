@@ -114,6 +114,11 @@ export interface SessionInfoEntry extends SessionEntryBase {
 	name?: string;
 }
 
+export interface SessionLeafEntry extends SessionEntryBase {
+	type: "session_leaf";
+	targetId: string | null;
+}
+
 /**
  * Custom message entry for extensions to inject messages into LLM context.
  * Use customType to identify your extension's entries.
@@ -147,7 +152,7 @@ export type SessionEntry =
 	| SessionInfoEntry;
 
 /** Raw file entry (includes header) */
-export type FileEntry = SessionHeader | SessionEntry;
+export type FileEntry = SessionHeader | SessionEntry | SessionLeafEntry;
 
 /** Tree node for getTree() - defensive copy of session structure */
 export interface SessionTreeNode {
@@ -758,6 +763,12 @@ export class SessionManager {
 		this.leafId = null;
 		for (const entry of this.fileEntries) {
 			if (entry.type === "session") continue;
+			if (entry.type === "session_leaf") {
+				if (entry.targetId === null || this.byId.has(entry.targetId)) {
+					this.leafId = entry.targetId;
+				}
+				continue;
+			}
 			this.byId.set(entry.id, entry);
 			this.leafId = entry.id;
 			if (entry.type === "label") {
@@ -798,7 +809,7 @@ export class SessionManager {
 		return this.sessionFile;
 	}
 
-	_persist(entry: SessionEntry): void {
+	_persist(entry: FileEntry): void {
 		if (!this.persist || !this.sessionFile) return;
 
 		const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
@@ -822,6 +833,19 @@ export class SessionManager {
 		this.fileEntries.push(entry);
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
+		this._persist(entry);
+	}
+
+	private _appendLeafMarker(targetId: string | null): void {
+		if (!this.persist) return;
+		const entry: SessionLeafEntry = {
+			type: "session_leaf",
+			id: generateId({ has: (id) => this.byId.has(id) || this.fileEntries.some((entry) => entry.id === id) }),
+			parentId: targetId,
+			timestamp: new Date().toISOString(),
+			targetId,
+		};
+		this.fileEntries.push(entry);
 		this._persist(entry);
 	}
 
@@ -1064,7 +1088,7 @@ export class SessionManager {
 	 * change the leaf pointer. Entries cannot be modified or deleted.
 	 */
 	getEntries(): SessionEntry[] {
-		return this.fileEntries.filter((e): e is SessionEntry => e.type !== "session");
+		return this.fileEntries.filter((e): e is SessionEntry => e.type !== "session" && e.type !== "session_leaf");
 	}
 
 	/**
@@ -1127,6 +1151,7 @@ export class SessionManager {
 			throw new Error(`Entry ${branchFromId} not found`);
 		}
 		this.leafId = branchFromId;
+		this._appendLeafMarker(branchFromId);
 	}
 
 	/**
@@ -1136,6 +1161,7 @@ export class SessionManager {
 	 */
 	resetLeaf(): void {
 		this.leafId = null;
+		this._appendLeafMarker(null);
 	}
 
 	/**

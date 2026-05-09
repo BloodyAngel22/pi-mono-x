@@ -12,7 +12,7 @@
 
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import { matchesKey, Text, truncateToWidth } from "@mariozechner/pi-tui";
+import { getKeybindings, matchesKey, Text, type TUI, truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 
 interface Todo {
@@ -33,6 +33,63 @@ const TodoParams = Type.Object({
 	text: Type.Optional(Type.String({ description: "Todo text (for add)" })),
 	id: Type.Optional(Type.Number({ description: "Todo ID (for toggle)" })),
 });
+
+const TODO_BAR_WIDTH = 10;
+
+function formatTodoBar(done: number, total: number): string {
+	if (total === 0) return `[${"░".repeat(TODO_BAR_WIDTH)}]`;
+	const filled = Math.round((done / total) * TODO_BAR_WIDTH);
+	return `[${"█".repeat(filled)}${"░".repeat(TODO_BAR_WIDTH - filled)}]`;
+}
+
+class TodoWidgetComponent {
+	private collapsed = true;
+
+	constructor(
+		private todos: Todo[],
+		private theme: Theme,
+		private tui: TUI,
+	) {}
+
+	update(todos: Todo[]): void {
+		this.todos = todos;
+		this.tui.requestRender();
+	}
+
+	handleInput(data: string): void {
+		if (getKeybindings().matches(data, "app.tools.expand")) {
+			this.collapsed = !this.collapsed;
+			this.tui.requestRender();
+		}
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		if (this.todos.length === 0) return [];
+		const done = this.todos.filter((todo) => todo.done).length;
+		const total = this.todos.length;
+		const current = this.todos.find((todo) => !todo.done);
+		const title = this.theme.fg("accent", "Todo");
+		const progress = this.theme.fg(done === total ? "success" : "muted", formatTodoBar(done, total));
+		const toggleKeys = getKeybindings().getKeys("app.tools.expand").join("/");
+		const toggle = toggleKeys ? this.theme.fg("dim", `(${toggleKeys})`) : "";
+		const currentText = current
+			? ` · ${this.theme.fg("text", current.text)}`
+			: ` · ${this.theme.fg("success", "complete")}`;
+		const lines = [
+			truncateToWidth(` ${title} ${progress} ${done}/${total}${currentText}${toggle ? ` ${toggle}` : ""}`, width),
+		];
+		if (!this.collapsed) {
+			for (const todo of this.todos) {
+				const check = todo.done ? this.theme.fg("success", "✓") : this.theme.fg("dim", "○");
+				const text = todo.done ? this.theme.fg("dim", todo.text) : this.theme.fg("text", todo.text);
+				lines.push(truncateToWidth(`   ${check} ${this.theme.fg("accent", `#${todo.id}`)} ${text}`, width));
+			}
+		}
+		return lines;
+	}
+}
 
 /**
  * UI component for the /todos command
@@ -106,6 +163,23 @@ export default function (pi: ExtensionAPI) {
 	// In-memory state (reconstructed from session on load)
 	let todos: Todo[] = [];
 	let nextId = 1;
+	let todoWidget: TodoWidgetComponent | undefined;
+
+	const updateWidget = (ctx: ExtensionContext) => {
+		if (!ctx.hasUI) return;
+		if (todoWidget) {
+			todoWidget.update([...todos]);
+			return;
+		}
+		ctx.ui.setWidget(
+			"todo",
+			(tui, theme) => {
+				todoWidget = new TodoWidgetComponent([...todos], theme, tui);
+				return todoWidget;
+			},
+			{ placement: "belowEditor" },
+		);
+	};
 
 	/**
 	 * Reconstruct state from session entries.
@@ -126,6 +200,8 @@ export default function (pi: ExtensionAPI) {
 				nextId = details.nextId;
 			}
 		}
+		todoWidget = undefined;
+		updateWidget(ctx);
 	};
 
 	// Reconstruct state on session events
@@ -139,9 +215,10 @@ export default function (pi: ExtensionAPI) {
 		description: "Manage a todo list. Actions: list, add (text), toggle (id), clear",
 		parameters: TodoParams,
 
-		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			switch (params.action) {
 				case "list":
+					updateWidget(ctx);
 					return {
 						content: [
 							{
@@ -156,6 +233,7 @@ export default function (pi: ExtensionAPI) {
 
 				case "add": {
 					if (!params.text) {
+						updateWidget(ctx);
 						return {
 							content: [{ type: "text", text: "Error: text required for add" }],
 							details: { action: "add", todos: [...todos], nextId, error: "text required" } as TodoDetails,
@@ -163,6 +241,7 @@ export default function (pi: ExtensionAPI) {
 					}
 					const newTodo: Todo = { id: nextId++, text: params.text, done: false };
 					todos.push(newTodo);
+					updateWidget(ctx);
 					return {
 						content: [{ type: "text", text: `Added todo #${newTodo.id}: ${newTodo.text}` }],
 						details: { action: "add", todos: [...todos], nextId } as TodoDetails,
@@ -171,6 +250,7 @@ export default function (pi: ExtensionAPI) {
 
 				case "toggle": {
 					if (params.id === undefined) {
+						updateWidget(ctx);
 						return {
 							content: [{ type: "text", text: "Error: id required for toggle" }],
 							details: { action: "toggle", todos: [...todos], nextId, error: "id required" } as TodoDetails,
@@ -178,6 +258,7 @@ export default function (pi: ExtensionAPI) {
 					}
 					const todo = todos.find((t) => t.id === params.id);
 					if (!todo) {
+						updateWidget(ctx);
 						return {
 							content: [{ type: "text", text: `Todo #${params.id} not found` }],
 							details: {
@@ -189,6 +270,7 @@ export default function (pi: ExtensionAPI) {
 						};
 					}
 					todo.done = !todo.done;
+					updateWidget(ctx);
 					return {
 						content: [{ type: "text", text: `Todo #${todo.id} ${todo.done ? "completed" : "uncompleted"}` }],
 						details: { action: "toggle", todos: [...todos], nextId } as TodoDetails,
@@ -199,6 +281,7 @@ export default function (pi: ExtensionAPI) {
 					const count = todos.length;
 					todos = [];
 					nextId = 1;
+					updateWidget(ctx);
 					return {
 						content: [{ type: "text", text: `Cleared ${count} todos` }],
 						details: { action: "clear", todos: [], nextId: 1 } as TodoDetails,
@@ -206,6 +289,7 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				default:
+					updateWidget(ctx);
 					return {
 						content: [{ type: "text", text: `Unknown action: ${params.action}` }],
 						details: {
