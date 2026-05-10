@@ -4,8 +4,10 @@ import { Type } from "typebox";
 import { beforeAll, describe, expect, test } from "vitest";
 import type { ToolDefinition } from "../src/core/extensions/types.js";
 import { type BashOperations, createBashToolDefinition } from "../src/core/tools/bash.js";
+import { createEditToolDefinition } from "../src/core/tools/edit.js";
 import { createReadTool, createReadToolDefinition } from "../src/core/tools/read.js";
 import { createWriteToolDefinition } from "../src/core/tools/write.js";
+import { TaskBlockComponent } from "../src/modes/interactive/components/task-block.js";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
@@ -327,5 +329,90 @@ describe("ToolExecutionComponent parity", () => {
 		expect(rendered).toContain("one");
 		expect(rendered).toContain("two");
 		expect(rendered).not.toContain("two\n\n");
+	});
+
+	test("renders write content below collapsed task blocks", () => {
+		const block = new TaskBlockComponent("write file", createFakeTui(), Date.now());
+		const component = new ToolExecutionComponent(
+			"write",
+			"tool-9",
+			{ path: "README.md", content: "created line\nsecond line" },
+			{ verbosityLevel: "compact" },
+			createWriteToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult(
+			{
+				content: [{ type: "text", text: "Successfully wrote 24 bytes to README.md" }],
+				details: undefined,
+				isError: false,
+			},
+			false,
+		);
+		block.addTool(component);
+		block.finalize(false, block.buildSummary());
+
+		const rendered = stripAnsi(block.render(120).join("\n"));
+		expect(rendered).toContain("write file");
+		expect(rendered).toContain("created line");
+		expect(rendered).toContain("second line");
+	});
+
+	test("renders edit diffs below collapsed task blocks", () => {
+		const block = new TaskBlockComponent("edit file", createFakeTui(), Date.now());
+		const component = new ToolExecutionComponent(
+			"edit",
+			"tool-10",
+			{ path: "README.md", edits: [{ oldText: "before", newText: "after" }] },
+			{ verbosityLevel: "compact" },
+			createEditToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult(
+			{
+				content: [{ type: "text", text: "Successfully replaced 1 block(s) in README.md." }],
+				details: { diff: "@@ -1 +1 @@\n-before\n+after", firstChangedLine: 1 },
+				isError: false,
+			},
+			false,
+		);
+		block.addTool(component);
+		block.finalize(false, block.buildSummary());
+
+		const rendered = stripAnsi(block.render(120).join("\n"));
+		expect(rendered).toContain("edit file");
+		expect(rendered).toContain("-before");
+		expect(rendered).toContain("+after");
+	});
+
+	test("does not append ellipses to long file-change lines below task blocks", () => {
+		const block = new TaskBlockComponent("edit file", createFakeTui(), Date.now());
+		const longLine = "# Файловый менеджер — версия 2.0 ".repeat(8);
+		const component = new ToolExecutionComponent(
+			"edit",
+			"tool-11",
+			{ path: "script.sh", edits: [{ oldText: longLine, newText: longLine.replace("2.0", "3.0") }] },
+			{ verbosityLevel: "compact" },
+			createEditToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult(
+			{
+				content: [{ type: "text", text: "Successfully replaced 1 block(s) in script.sh." }],
+				details: { diff: `-3 ${longLine}\n+3 ${longLine.replace("2.0", "3.0")}`, firstChangedLine: 3 },
+				isError: false,
+			},
+			false,
+		);
+		block.addTool(component);
+		block.finalize(false, block.buildSummary());
+
+		const rendered = stripAnsi(block.render(80).join("\n"));
+		expect(rendered).toContain("-3");
+		expect(rendered).toContain("+3");
+		expect(rendered).not.toContain("...");
 	});
 });

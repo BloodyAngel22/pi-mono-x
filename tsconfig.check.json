@@ -1,0 +1,29 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"paths": {
+			"*": ["./*"],
+			"@mariozechner/pi-ai": ["./packages/ai/dist/index.d.ts"],
+			"@mariozechner/pi-ai/oauth": ["./packages/ai/dist/oauth.d.ts"],
+			"@mariozechner/pi-ai/*": ["./packages/ai/dist/*.d.ts", "./packages/ai/dist/providers/*.d.ts"],
+			"@mariozechner/pi-ai/dist/*": ["./packages/ai/dist/*"],
+			"@mariozechner/pi-agent-core": ["./packages/agent/src/index.ts"],
+			"@mariozechner/pi-agent-core/*": ["./packages/agent/src/*"],
+			"@mariozechner/pi-coding-agent": ["./packages/coding-agent/src/index.ts"],
+			"@mariozechner/pi-coding-agent/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
+			"@mariozechner/pi-coding-agent/*": ["./packages/coding-agent/src/*"],
+			"typebox": ["./node_modules/typebox"],
+			"@mariozechner/pi-mom": ["./packages/mom/src/index.ts"],
+			"@mariozechner/pi-mom/*": ["./packages/mom/src/*"],
+			"@mariozechner/pi": ["./packages/pods/src/index.ts"],
+			"@mariozechner/pi/*": ["./packages/pods/src/*"],
+			"@mariozechner/pi-tui": ["./packages/tui/src/index.ts"],
+			"@mariozechner/pi-tui/*": ["./packages/tui/src/*"],
+			"@mariozechner/pi-web-ui": ["./packages/web-ui/src/index.ts"],
+			"@mariozechner/pi-web-ui/*": ["./packages/web-ui/src/*"],
+			"@mariozechner/pi-agent-old": ["./packages/agent-old/src/index.ts"],
+			"@mariozechner/pi-agent-old/*": ["./packages/agent-old/src/*"]
+		}
+	},
+	"exclude": ["packages/ai/**/*", "packages/web-ui/**/*", "**/dist/**"]
+}

@@ -3642,8 +3642,7 @@ export class InteractiveMode {
 	}
 
 	showWarning(warningMessage: string): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("warning", `Warning: ${warningMessage}`), 1, 0));
+		void warningMessage;
 		this.ui.requestRender();
 	}
 
@@ -5894,12 +5893,13 @@ export class InteractiveMode {
 				`More options`,
 			];
 			const choice = await this.showExtensionSelectorAsync(`${title}\n${message}`, choices);
-			if (!choice) return null;
+			if (!choice) return { decision: "deny-once" as const };
 
 			if (choice === "Allow once") return { decision: "allow-once" as const };
 			if (choice === "Deny once") return { decision: "deny-once" as const };
 			if (choice === "Allow for session") return { decision: "allow-always" as const, scope: "session" as const };
-			if (choice === "More options") return this.showAdvancedPermissionOptions(info);
+			if (choice === "More options")
+				return (await this.showAdvancedPermissionOptions(info)) ?? { decision: "deny-once" as const };
 
 			// For "always" decisions, ask where to save the rule
 			const decision = choice === "Allow and save rule" ? ("allow-always" as const) : ("deny-always" as const);
@@ -5909,8 +5909,7 @@ export class InteractiveMode {
 				`This session only (in memory)`,
 			];
 			const scopeChoice = await this.showExtensionSelectorAsync("Save rule to:", scopeChoices);
-			if (!scopeChoice)
-				return { decision: decision === "allow-always" ? ("allow-once" as const) : ("deny-once" as const) };
+			if (!scopeChoice) return { decision: "deny-once" as const };
 
 			let scope: "local" | "global" | "session";
 			if (scopeChoice.startsWith("Global")) scope = "global";
@@ -5931,7 +5930,7 @@ export class InteractiveMode {
 			"Deny",
 			"Cancel",
 		]);
-		if (!decisionChoice || decisionChoice === "Cancel") return null;
+		if (!decisionChoice || decisionChoice === "Cancel") return { decision: "deny-once" as const };
 
 		const scopeChoice = await this.showExtensionSelectorAsync("How long?", [
 			"Once",
@@ -5939,7 +5938,7 @@ export class InteractiveMode {
 			"Save to current project",
 			"Save globally",
 		]);
-		if (!scopeChoice) return null;
+		if (!scopeChoice) return { decision: "deny-once" as const };
 
 		const persistent = scopeChoice !== "Once";
 		const decision =
@@ -5958,6 +5957,7 @@ export class InteractiveMode {
 		else scope = "local";
 
 		const match = await this.selectAdvancedPermissionMatch(info);
+		if (match === null) return { decision: "deny-once" as const };
 		if (!match) return { decision, scope };
 		return { decision, scope, match };
 	}
@@ -5965,7 +5965,7 @@ export class InteractiveMode {
 	private async selectAdvancedPermissionMatch(info: {
 		type: "bash" | "file" | "mcp";
 		value: string;
-	}): Promise<string | undefined> {
+	}): Promise<string | null | undefined> {
 		if (info.type === "file") {
 			const fileName = path.basename(info.value);
 			const ext = path.extname(info.value);
@@ -5976,7 +5976,7 @@ export class InteractiveMode {
 				`File type (*${ext || ".*"})`,
 			];
 			const choice = await this.showExtensionSelectorAsync("Apply rule to:", choices);
-			if (!choice) return undefined;
+			if (!choice) return null;
 			if (choice.startsWith("Directory")) return path.join(dir, "*");
 			if (choice.startsWith("File type") && ext) return `*${ext}`;
 			return info.value;
@@ -5985,7 +5985,8 @@ export class InteractiveMode {
 			const firstWord = info.value.trim().split(/\s+/)[0];
 			const choices = [`Exact command`, firstWord ? `Command family (${firstWord} *)` : "Command family"];
 			const choice = await this.showExtensionSelectorAsync("Apply rule to:", choices);
-			if (!choice || choice === "Exact command" || !firstWord) return info.value;
+			if (!choice) return null;
+			if (choice === "Exact command" || !firstWord) return info.value;
 			return `${firstWord} *`;
 		}
 		return info.value;

@@ -45,7 +45,7 @@ echo "────────────────────────�
 
 # Core packages — strict dependency order
 build_pkg tui
-build_pkg ai
+#build_pkg ai
 build_pkg agent
 build_pkg coding-agent
 build_pkg mom

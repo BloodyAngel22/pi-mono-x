@@ -60,7 +60,7 @@ export class ToolExecutionComponent extends Container {
 		this.builtInToolDefinition = createAllToolDefinitions(cwd)[toolName as ToolName];
 		this.showImages = options.showImages ?? true;
 		this.imageWidthCells = options.imageWidthCells ?? 60;
-		this.verbosityLevel = options.verbosityLevel ?? "compact";
+		this.verbosityLevel = options.verbosityLevel ?? "full";
 		this.ui = ui;
 		this.cwd = cwd;
 
@@ -229,6 +229,10 @@ export class ToolExecutionComponent extends Container {
 		return this.result?.isError ?? false;
 	}
 
+	hasResult(): boolean {
+		return this.result !== undefined;
+	}
+
 	override invalidate(): void {
 		super.invalidate();
 		this.updateDisplay();
@@ -239,6 +243,16 @@ export class ToolExecutionComponent extends Container {
 			return [];
 		}
 		return super.render(width);
+	}
+
+	renderExpanded(width: number): string[] {
+		const wasExpanded = this.expanded;
+		this.expanded = true;
+		this.updateDisplay();
+		const lines = this.render(width);
+		this.expanded = wasExpanded;
+		this.updateDisplay();
+		return lines;
 	}
 
 	private updateDisplay(): void {

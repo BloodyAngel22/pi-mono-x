@@ -1061,9 +1061,21 @@ export class TUI extends Container {
 		// Differential rendering can only touch what was actually visible.
 		// If the first changed line is above the previous viewport, we need a full redraw.
 		if (firstChanged < prevViewportTop) {
-			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
-			fullRender(true);
-			return;
+			if (newLines.length === this.previousLines.length) {
+				if (lastChanged < prevViewportTop) {
+					this.positionHardwareCursor(cursorPos, newLines.length);
+					this.previousLines = newLines;
+					this.previousWidth = width;
+					this.previousHeight = height;
+					this.previousViewportTop = prevViewportTop;
+					return;
+				}
+				firstChanged = prevViewportTop;
+			} else {
+				logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
+				fullRender(true);
+				return;
+			}
 		}
 
 		// Render from first changed line to end
@@ -1094,13 +1106,24 @@ export class TUI extends Container {
 
 		buffer += appendStart ? "\r\n" : "\r"; // Move to column 0
 
-		// Only render changed lines (firstChanged to lastChanged), not all lines to end
-		// This reduces flicker when only a single line changes (e.g., spinner animation)
+		// Only touch lines whose rendered content changed.
 		const renderEnd = Math.min(lastChanged, newLines.length - 1);
+		let finalCursorRow = appendStart ? firstChanged : moveTargetRow;
 		for (let i = firstChanged; i <= renderEnd; i++) {
-			if (i > firstChanged) buffer += "\r\n";
-			buffer += "\x1b[2K"; // Clear current line
+			const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
 			const line = newLines[i];
+			if (oldLine === line) continue;
+			const rowDiff = i - finalCursorRow;
+			if (rowDiff > 0) {
+				const existingRows = Math.max(0, Math.min(i, this.previousLines.length - 1) - finalCursorRow);
+				if (existingRows > 0) buffer += `\x1b[${existingRows}B`;
+				const appendedRows = rowDiff - existingRows;
+				if (appendedRows > 0) buffer += "\r\n".repeat(appendedRows);
+				buffer += "\r";
+			} else if (rowDiff < 0) {
+				buffer += `\x1b[${-rowDiff}A\r`;
+			}
+			buffer += "\x1b[2K"; // Clear current line
 			const isImage = isImageLine(line);
 			if (!isImage && visibleWidth(line) > width) {
 				// Log all lines to crash file for debugging
@@ -1131,10 +1154,8 @@ export class TUI extends Container {
 				throw new Error(errorMsg);
 			}
 			buffer += line;
+			finalCursorRow = i;
 		}
-
-		// Track where cursor ended up after rendering
-		let finalCursorRow = renderEnd;
 
 		// If we had more lines before, clear them and move cursor back
 		if (this.previousLines.length > newLines.length) {

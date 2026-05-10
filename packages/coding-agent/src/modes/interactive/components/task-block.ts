@@ -170,6 +170,24 @@ export class TaskBlockComponent extends Container {
 		return truncateToWidth(`${connector}◆ ${tool.toolName}`, width);
 	}
 
+	private renderFileChangeLines(tool: ToolExecutionComponent, width: number): string[] {
+		if ((tool.toolName !== "write" && tool.toolName !== "edit") || !tool.hasResult() || tool.getIsError()) {
+			return [];
+		}
+		const contentWidth = Math.max(1, width - 3);
+		const rendered = tool.renderExpanded(contentWidth);
+		const firstContentIndex = rendered.findIndex((line) => stripAnsi(line).trim().length > 0);
+		if (firstContentIndex < 0) return [];
+		let bodyStart = firstContentIndex + 1;
+		while (bodyStart < rendered.length && stripAnsi(rendered[bodyStart]).trim().length === 0) {
+			bodyStart++;
+		}
+		return rendered
+			.slice(bodyStart)
+			.filter((line) => stripAnsi(line).trim().length > 0)
+			.map((line) => truncateToWidth(`   ${line}`, width, ""));
+	}
+
 	private formatSummary(): string | undefined {
 		if (!this.summary) return undefined;
 		const parts: string[] = [];
@@ -235,6 +253,12 @@ export class TaskBlockComponent extends Container {
 			if (summary) {
 				lines.push(truncateToWidth(theme.fg("dim", `   · ${summary}`), width));
 			}
+		}
+
+		const fileChangeLines = this.tools.flatMap((tool) => this.renderFileChangeLines(tool, width));
+		if (fileChangeLines.length > 0) {
+			lines.push("");
+			lines.push(...fileChangeLines);
 		}
 
 		return lines;

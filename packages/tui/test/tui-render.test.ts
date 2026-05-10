@@ -368,6 +368,36 @@ describe("TUI differential rendering", () => {
 		tui.stop();
 	});
 
+	it("does not repaint unchanged lines between non-adjacent changed lines", async () => {
+		const terminal = new LoggingVirtualTerminal(40, 10);
+		const tui = new TUI(terminal);
+		const component = new TestComponent();
+		tui.addChild(component);
+
+		component.lines = ["Line 0", "Line 1", "Stable middle", "Line 3", "Line 4"];
+		tui.start();
+		await terminal.waitForRender();
+		terminal.clearWrites();
+
+		component.lines = ["Line 0", "Changed 1", "Stable middle", "Changed 3", "Line 4"];
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		const writes = terminal.getWrites();
+		assert.ok(writes.includes("Changed 1"), "First changed line should be written");
+		assert.ok(writes.includes("Changed 3"), "Second changed line should be written");
+		assert.ok(!writes.includes("Stable middle"), "Unchanged middle line should not be repainted");
+		assert.deepStrictEqual(terminal.getViewport().slice(0, 5), [
+			"Line 0",
+			"Changed 1",
+			"Stable middle",
+			"Changed 3",
+			"Line 4",
+		]);
+
+		tui.stop();
+	});
+
 	it("handles transition from content to empty and back to content", async () => {
 		const terminal = new VirtualTerminal(40, 10);
 		const tui = new TUI(terminal);
@@ -417,6 +447,59 @@ describe("TUI differential rendering", () => {
 
 		assert.ok(tui.fullRedraws > initialRedraws, "Shrink should trigger a full redraw");
 		assert.deepStrictEqual(terminal.getViewport(), ["Line 2", "Line 3", "Line 4", "Line 5", "Line 6"]);
+
+		tui.stop();
+	});
+
+	it("does not full re-render when only offscreen lines change", async () => {
+		const terminal = new LoggingVirtualTerminal(20, 5);
+		const tui = new TUI(terminal);
+		const component = new TestComponent();
+		tui.addChild(component);
+
+		component.lines = Array.from({ length: 12 }, (_, i) => `Line ${i}`);
+		tui.start();
+		await terminal.waitForRender();
+		terminal.clearWrites();
+		const initialRedraws = tui.fullRedraws;
+
+		component.lines = component.lines.map((line, index) => (index === 0 ? "Changed offscreen" : line));
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		assert.strictEqual(tui.fullRedraws, initialRedraws, "Offscreen line change should stay differential");
+		assert.ok(!terminal.getWrites().includes("\x1b[2J"), "Offscreen line change should not clear the screen");
+		assert.deepStrictEqual(terminal.getViewport(), ["Line 7", "Line 8", "Line 9", "Line 10", "Line 11"]);
+
+		tui.stop();
+	});
+
+	it("differentially renders visible changes even when earlier offscreen lines also change", async () => {
+		const terminal = new LoggingVirtualTerminal(20, 5);
+		const tui = new TUI(terminal);
+		const component = new TestComponent();
+		tui.addChild(component);
+
+		component.lines = Array.from({ length: 12 }, (_, i) => `Line ${i}`);
+		tui.start();
+		await terminal.waitForRender();
+		terminal.clearWrites();
+		const initialRedraws = tui.fullRedraws;
+
+		component.lines = component.lines.map((line, index) => {
+			if (index === 0) return "Changed offscreen";
+			if (index === 9) return "Changed visible";
+			return line;
+		});
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		assert.strictEqual(tui.fullRedraws, initialRedraws, "Mixed offscreen/visible changes should stay differential");
+		assert.ok(
+			!terminal.getWrites().includes("\x1b[2J"),
+			"Mixed offscreen/visible changes should not clear the screen",
+		);
+		assert.deepStrictEqual(terminal.getViewport(), ["Line 7", "Line 8", "Changed visible", "Line 10", "Line 11"]);
 
 		tui.stop();
 	});
