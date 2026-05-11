@@ -29,6 +29,7 @@ import type {
 	SlashCommand,
 } from "@mariozechner/pi-tui";
 import {
+	CachedContainer,
 	CombinedAutocompleteProvider,
 	type Component,
 	Container,
@@ -222,7 +223,8 @@ export interface InteractiveModeOptions {
 export class InteractiveMode {
 	private runtimeHost: AgentSessionRuntime;
 	private ui: TUI;
-	private chatContainer: Container;
+	private chatContainer: CachedContainer;
+	private liveRegionContainer: Container;
 	private pendingMessagesContainer: Container;
 	private statusContainer: Container;
 	private defaultEditor: CustomEditor;
@@ -357,7 +359,8 @@ export class InteractiveMode {
 		this.ui = new TUI(new ProcessTerminal(), this.settingsManager.getShowHardwareCursor());
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		this.headerContainer = new Container();
-		this.chatContainer = new Container();
+		this.chatContainer = new CachedContainer();
+		this.liveRegionContainer = new Container();
 		this.pendingMessagesContainer = new Container();
 		this.statusContainer = new Container();
 		this.widgetContainerAbove = new Container();
@@ -647,13 +650,15 @@ export class InteractiveMode {
 		}
 
 		this.ui.addChild(this.chatContainer);
-		this.ui.addChild(this.pendingMessagesContainer);
-		this.ui.addChild(this.statusContainer);
+		this.liveRegionContainer.addChild(this.pendingMessagesContainer);
+		this.liveRegionContainer.addChild(this.statusContainer);
 		this.renderWidgets(); // Initialize with default spacer
-		this.ui.addChild(this.widgetContainerAbove);
-		this.ui.addChild(this.editorContainer);
-		this.ui.addChild(this.widgetContainerBelow);
-		this.ui.addChild(this.footer);
+		this.liveRegionContainer.addChild(this.widgetContainerAbove);
+		this.liveRegionContainer.addChild(this.editorContainer);
+		this.liveRegionContainer.addChild(this.widgetContainerBelow);
+		this.liveRegionContainer.addChild(this.footer);
+		this.ui.addChild(this.liveRegionContainer);
+		this.ui.setFastRenderRoot(this.liveRegionContainer);
 		this.ui.setFocus(this.editor);
 
 		this.setupKeyHandlers();
@@ -1591,6 +1596,7 @@ export class InteractiveMode {
 	}
 
 	private renderCurrentSessionState(): void {
+		this.ui.invalidateFastRender();
 		this.chatContainer.clear();
 		this.pendingMessagesContainer.clear();
 		this.compactionQueuedMessages = [];
@@ -1712,6 +1718,7 @@ export class InteractiveMode {
 				child.setHiddenThinkingLabel(this.hiddenThinkingLabel);
 			}
 		}
+		this.chatContainer.markDirty();
 		if (this.streamingComponent) {
 			this.streamingComponent.setHiddenThinkingLabel(this.hiddenThinkingLabel);
 		}
@@ -1889,22 +1896,23 @@ export class InteractiveMode {
 			this.customFooter.dispose();
 		}
 
-		// Remove current footer from UI
+		// Remove current footer from live region
 		if (this.customFooter) {
-			this.ui.removeChild(this.customFooter);
+			this.liveRegionContainer.removeChild(this.customFooter);
 		} else {
-			this.ui.removeChild(this.footer);
+			this.liveRegionContainer.removeChild(this.footer);
 		}
 
 		if (factory) {
 			// Create and add custom footer, passing the data provider
 			this.customFooter = factory(this.ui, theme, this.footerDataProvider);
-			this.ui.addChild(this.customFooter);
+			this.liveRegionContainer.addChild(this.customFooter);
 		} else {
 			// Restore built-in footer
 			this.customFooter = undefined;
-			this.ui.addChild(this.footer);
+			this.liveRegionContainer.addChild(this.footer);
 		}
+		this.ui.invalidateFastRender();
 
 		this.ui.requestRender();
 	}
@@ -2422,6 +2430,7 @@ export class InteractiveMode {
 			if (wasBashMode !== this.isBashMode) {
 				this.updateEditorBorderColor();
 			}
+			this.ui.requestFastRender();
 		};
 
 		// Handle clipboard image paste (triggered on Ctrl+V)
@@ -3557,6 +3566,7 @@ export class InteractiveMode {
 				child.setExpanded(expanded);
 			}
 		}
+		this.chatContainer.markDirty();
 		this.ui.requestRender();
 	}
 
@@ -3952,6 +3962,7 @@ export class InteractiveMode {
 								child.setShowImages(enabled);
 							}
 						}
+						this.chatContainer.markDirty();
 					},
 					onImageWidthCellsChange: (width) => {
 						this.settingsManager.setImageWidthCells(width);
@@ -3962,6 +3973,7 @@ export class InteractiveMode {
 								child.setImageWidthCells(width);
 							}
 						}
+						this.chatContainer.markDirty();
 					},
 					onAutoResizeImagesChange: (enabled) => {
 						this.settingsManager.setImageAutoResize(enabled);

@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- Fixed MCP startup to stop blocking indefinitely: server initialization now has a 5 second soft timeout, continues in the background, and retries unavailable servers with backoff.
+- Fixed `write` and `edit` tool rendering to show a distinct file-operation block with path, status, and change statistics.
 - Fixed session tree navigation so the selected active branch persists across `/resume`, session switches, and pi restarts.
 - Updated `@mariozechner/clipboard` to an attested release so package managers with trust policies do not reject installs ([#3946](https://github.com/badlogic/pi-mono/issues/3946)).
 - Fixed project context discovery to load `AGENTS.MD` files in addition to `AGENTS.md` ([#3949](https://github.com/badlogic/pi-mono/issues/3949)).

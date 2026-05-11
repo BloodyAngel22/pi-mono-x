@@ -23,6 +23,21 @@ interface McpConfig {
   mcpServers: Record<string, McpServerConfig>;
 }
 
+type McpServerStatus = {
+  status: "connected" | "error" | "connecting" | "retrying";
+  error?: string;
+  attempt?: number;
+  nextRetryAt?: number;
+};
+
+const SOFT_STARTUP_TIMEOUT_MS = 5000;
+const INITIAL_RETRY_DELAY_MS = 5000;
+const MAX_RETRY_DELAY_MS = 60000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export default async function (pi: ExtensionAPI): Promise<void> {
   const mcpDir = path.join(homedir(), ".pi", "agent", "mcp");
   const configPath = path.join(homedir(), ".pi", "agent", "mcp-config.json");
@@ -54,12 +69,26 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 
   const config: McpConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
   const clients: Map<string, Client> = new Map();
-  const serverStatus: Map<string, { status: "connected" | "error" | "connecting"; error?: string }> = new Map();
+  const serverStatus: Map<string, McpServerStatus> = new Map();
   let sessionGeneration = 0;
 
   for (const [name, cfg] of Object.entries(config.mcpServers)) {
     if (!cfg.disabled) serverStatus.set(name, { status: "connecting" });
   }
+
+  const updateStatus = (ctx: ExtensionContext, total: number): void => {
+    if (!ctx.hasUI) return;
+    const statuses = [...serverStatus.values()];
+    const ready = statuses.filter((s) => s.status === "connected").length;
+    const active = statuses.filter((s) => s.status === "connecting" || s.status === "retrying").length;
+    if (ready === total) {
+      ctx.ui.setStatus("mcp", `✓ MCP: ${ready} ready`);
+    } else if (active > 0) {
+      ctx.ui.setStatus("mcp", `⟳ MCP ${ready}/${total} ready, ${active} loading`);
+    } else {
+      ctx.ui.setStatus("mcp", `⚠ MCP: ${ready}/${total} ready`);
+    }
+  };
 
   pi.on("session_start", async (event, ctx) => {
     const myGeneration = ++sessionGeneration;
@@ -73,18 +102,16 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 
     const serverEntries = Object.entries(config.mcpServers).filter(([, cfg]) => !cfg.disabled);
     const total = serverEntries.length;
-    let done = 0;
 
     if (total === 0) {
       if (ctx.hasUI) ctx.ui.setStatus("mcp", "");
       return;
     }
 
-    if (ctx.hasUI) ctx.ui.setStatus("mcp", `⟳ MCP 0/${total}`);
-
-    const initServer = async (name: string, serverConfig: McpServerConfig): Promise<void> => {
-      log(`Initializing server: ${name}`);
-      serverStatus.set(name, { status: "connecting" });
+    const initServer = async (name: string, serverConfig: McpServerConfig, attempt: number): Promise<void> => {
+      log(`Initializing server: ${name} (attempt ${attempt})`);
+      serverStatus.set(name, { status: "connecting", attempt });
+      updateStatus(ctx, total);
 
       let client: Client;
       if (serverConfig.type === "remote" || serverConfig.url) {
@@ -142,7 +169,6 @@ export default async function (pi: ExtensionAPI): Promise<void> {
       }
 
       clients.set(name, client);
-      serverStatus.set(name, { status: "connected" });
 
       const toolsResponse = await client.request({ method: "tools/list" }, ListToolsResultSchema);
       log(`Registered ${toolsResponse.tools.length} tools from ${name}`);
@@ -176,32 +202,46 @@ export default async function (pi: ExtensionAPI): Promise<void> {
           }
         });
       }
+      serverStatus.set(name, { status: "connected", attempt });
+      updateStatus(ctx, total);
     };
 
-    await Promise.allSettled(
-      serverEntries.map(async ([name, serverConfig]) => {
+    const startServerWithRetry = async (name: string, serverConfig: McpServerConfig): Promise<void> => {
+      let attempt = 1;
+      let delay = INITIAL_RETRY_DELAY_MS;
+      while (myGeneration === sessionGeneration) {
         try {
-          await initServer(name, serverConfig);
+          await initServer(name, serverConfig, attempt);
+          return;
         } catch (error: any) {
-          serverStatus.set(name, { status: "error", error: error.message || String(error) });
+          const message = error?.message || String(error);
           log(`Failed to start server ${name}`, error);
-          if (myGeneration === sessionGeneration && ctx.hasUI) ctx.ui.notify(`MCP: ${name} failed to connect`, "warning");
-        } finally {
-          if (myGeneration !== sessionGeneration) return;
-          done++;
-          if (ctx.hasUI) ctx.ui.setStatus("mcp", `⟳ MCP ${done}/${total}`);
+          const nextRetryAt = Date.now() + delay;
+          serverStatus.set(name, { status: "retrying", error: message, attempt, nextRetryAt });
+          updateStatus(ctx, total);
+          if (attempt === 1 && ctx.hasUI) ctx.ui.notify(`MCP: ${name} unavailable, retrying in background`, "warning");
+          await sleep(delay);
+          attempt++;
+          delay = Math.min(delay * 2, MAX_RETRY_DELAY_MS);
         }
-      })
+      }
+    };
+
+    for (const [name] of serverEntries) {
+      serverStatus.set(name, { status: "connecting", attempt: 1 });
+    }
+    updateStatus(ctx, total);
+
+    const startupTasks = serverEntries.map(([name, serverConfig]) =>
+      startServerWithRetry(name, serverConfig).catch((error) => {
+        log(`Unexpected MCP background task failure for ${name}`, error);
+      }),
     );
 
+    await Promise.race([Promise.allSettled(startupTasks), sleep(SOFT_STARTUP_TIMEOUT_MS)]);
+
     if (myGeneration !== sessionGeneration) return;
-    if (ctx.hasUI) {
-      const successCount = [...serverStatus.values()].filter(s => s.status === "connected").length;
-      ctx.ui.setStatus("mcp", successCount === total
-        ? `✓ MCP: ${successCount} ready`
-        : `⚠ MCP: ${successCount}/${total} ready`
-      );
-    }
+    updateStatus(ctx, total);
   });
 
   pi.registerCommand("mcps", {
@@ -222,7 +262,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
             lines.push(borderLine("├", "─".repeat(availWidth - 2), "┤"));
 
             for (const [name, info] of serverStatus.entries()) {
-              const statusColor = info.status === "connected" ? "success" : (info.status === "connecting" ? "warning" : "error");
+              const statusColor = info.status === "connected" ? "success" : (info.status === "error" ? "error" : "warning");
               const statusText = info.status.toUpperCase();
               const namePart = ` • ${name}: `;
               const padding = Math.max(0, availWidth - 4 - namePart.length - statusText.length);
@@ -397,6 +437,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
   });
 
   pi.on("session_shutdown", async () => {
+    sessionGeneration++;
     log("Session shutdown: closing clients");
     await Promise.allSettled([...clients.values()].map((c) => c.close()));
     clients.clear();

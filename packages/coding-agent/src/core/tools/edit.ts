@@ -19,8 +19,9 @@ import {
 } from "./edit-diff.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
-import { invalidArgText, shortenPath, str } from "./render-utils.js";
+import { str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
+import { formatFileOperationSummary } from "./write.js";
 
 type EditPreview = EditDiffResult | EditDiffError;
 
@@ -188,15 +189,34 @@ function getRenderablePreviewInput(args: RenderableEditArgs | undefined): { path
 	return null;
 }
 
+function getEditStats(args: RenderableEditArgs | undefined): string[] {
+	const previewInput = getRenderablePreviewInput(args);
+	if (!previewInput) {
+		return [];
+	}
+	const replacements = previewInput.edits.length;
+	const removedLines = previewInput.edits.reduce(
+		(total, edit) => total + (edit.oldText.length === 0 ? 0 : edit.oldText.split("\n").length),
+		0,
+	);
+	const addedLines = previewInput.edits.reduce(
+		(total, edit) => total + (edit.newText.length === 0 ? 0 : edit.newText.split("\n").length),
+		0,
+	);
+	return [
+		`${replacements} replacement${replacements === 1 ? "" : "s"}`,
+		`-${removedLines} lines`,
+		`+${addedLines} lines`,
+	];
+}
+
 function formatEditCall(
 	args: RenderableEditArgs | undefined,
 	theme: typeof import("../../modes/interactive/theme/theme.js").theme,
+	status: "pending" | "success" | "error",
 ): string {
-	const invalidArg = invalidArgText(theme);
 	const rawPath = str(args?.file_path ?? args?.path);
-	const path = rawPath !== null ? shortenPath(rawPath) : null;
-	const pathDisplay = path === null ? invalidArg : path ? theme.fg("accent", path) : theme.fg("toolOutput", "...");
-	return `${theme.fg("toolTitle", theme.bold("edit"))} ${pathDisplay}`;
+	return formatFileOperationSummary("edit", rawPath, status, getEditStats(args), theme);
 }
 
 function formatEditResult(
@@ -252,7 +272,14 @@ function buildEditCallComponent(
 ): EditCallRenderComponent {
 	component.setBgFn(getEditHeaderBg(component.preview, component.settledError, theme));
 	component.clear();
-	component.addChild(new Text(formatEditCall(args, theme), 0, 0));
+	const status = component.preview
+		? "error" in component.preview
+			? "error"
+			: "success"
+		: component.settledError
+			? "error"
+			: "pending";
+	component.addChild(new Text(formatEditCall(args, theme, status), 0, 0));
 
 	if (!component.preview) {
 		return component;

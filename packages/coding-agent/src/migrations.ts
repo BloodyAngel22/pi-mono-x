@@ -191,17 +191,12 @@ function migrateToolsToBin(): void {
 }
 
 /**
- * Check for deprecated hooks/ and tools/ directories.
+ * Check for deprecated tools/ directories.
  * Note: tools/ may contain fd/rg binaries extracted by pi, so only warn if it has other files.
  */
 function checkDeprecatedExtensionDirs(baseDir: string, label: string): string[] {
-	const hooksDir = join(baseDir, "hooks");
 	const toolsDir = join(baseDir, "tools");
 	const warnings: string[] = [];
-
-	if (existsSync(hooksDir)) {
-		warnings.push(`${label} hooks/ directory found. Hooks have been renamed to extensions.`);
-	}
 
 	if (existsSync(toolsDir)) {
 		// Check if tools/ contains anything other than fd/rg (which are auto-extracted binaries)

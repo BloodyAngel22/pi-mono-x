@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed long interactive sessions to keep editor typing responsive by caching append-only history rendering and avoiding full-history line diffs for visible-only updates.
 - Fixed `ProcessTerminal` to fall back to `COLUMNS` and `LINES` before defaulting to 80x24 dimensions ([#4004](https://github.com/badlogic/pi-mono/issues/4004))
 - Fixed editor rendering artifacts for Thai Sara Am and Lao AM vowel characters ([#3904](https://github.com/badlogic/pi-mono/issues/3904))
 

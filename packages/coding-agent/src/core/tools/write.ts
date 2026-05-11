@@ -128,17 +128,46 @@ function trimTrailingEmptyLines(lines: string[]): string[] {
 	return lines.slice(0, end);
 }
 
+export function formatFileOperationSummary(
+	operation: "write" | "edit",
+	rawPath: string | null,
+	status: "pending" | "success" | "error",
+	stats: string[],
+	theme: typeof import("../../modes/interactive/theme/theme.js").theme,
+): string {
+	const invalidArg = invalidArgText(theme);
+	const path = rawPath !== null ? shortenPath(rawPath) : null;
+	const statusColor = status === "success" ? "success" : status === "error" ? "error" : "warning";
+	const statusText = status === "success" ? "done" : status === "error" ? "error" : "pending";
+	const lines = [
+		`${theme.fg("toolTitle", theme.bold(operation))} ${theme.fg(statusColor, statusText)}`,
+		`${theme.fg("muted", "file")} ${path === null ? invalidArg : path ? theme.fg("accent", path) : theme.fg("toolOutput", "...")}`,
+	];
+	if (stats.length > 0) {
+		lines.push(`${theme.fg("muted", "stats")} ${stats.join(theme.fg("muted", " · "))}`);
+	}
+	return lines.join("\n");
+}
+
+function getWriteStats(fileContent: string | null): string[] {
+	if (fileContent === null) {
+		return [];
+	}
+	const bytes = new TextEncoder().encode(fileContent).length;
+	const lines = fileContent.length === 0 ? 0 : fileContent.split("\n").length;
+	return [`${bytes} bytes`, `${lines} lines`];
+}
+
 function formatWriteCall(
 	args: { path?: string; file_path?: string; content?: string } | undefined,
 	options: ToolRenderResultOptions,
 	theme: typeof import("../../modes/interactive/theme/theme.js").theme,
 	cache: WriteHighlightCache | undefined,
+	status: "pending" | "success" | "error",
 ): string {
 	const rawPath = str(args?.file_path ?? args?.path);
 	const fileContent = str(args?.content);
-	const path = rawPath !== null ? shortenPath(rawPath) : null;
-	const invalidArg = invalidArgText(theme);
-	let text = `${theme.fg("toolTitle", theme.bold("write"))} ${path === null ? invalidArg : path ? theme.fg("accent", path) : theme.fg("toolOutput", "...")}`;
+	let text = formatFileOperationSummary("write", rawPath, status, getWriteStats(fileContent), theme);
 
 	if (fileContent === null) {
 		text += `\n\n${theme.fg("error", "[invalid content arg - expected string]")}`;
@@ -252,12 +281,14 @@ export function createWriteToolDefinition(
 			} else {
 				component.cache = undefined;
 			}
+			const status = context.isPartial ? "pending" : context.isError ? "error" : "success";
 			component.setText(
 				formatWriteCall(
 					renderArgs,
 					{ expanded: context.expanded, isPartial: context.isPartial },
 					theme,
 					component.cache,
+					status,
 				),
 			);
 			return component;

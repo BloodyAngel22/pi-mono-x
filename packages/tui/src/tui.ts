@@ -234,6 +234,10 @@ export class TUI extends Container {
 	private clearOnShrink = process.env.PI_CLEAR_ON_SHRINK === "1"; // Clear empty rows when content shrinks (default: off)
 	private maxLinesRendered = 0; // Track terminal's working area (max lines ever rendered)
 	private previousViewportTop = 0; // Track previous viewport top for resize-aware cursor moves
+	private fastRenderRoot: Component | undefined;
+	private previousFastRenderRootLineCount: number | undefined;
+	private previousRenderHadOverlays = false;
+	private fastRenderPending = false;
 	private fullRedrawCount = 0;
 	private stopped = false;
 
@@ -283,6 +287,22 @@ export class TUI extends Container {
 	 */
 	setClearOnShrink(enabled: boolean): void {
 		this.clearOnShrink = enabled;
+	}
+
+	setFastRenderRoot(component: Component | undefined): void {
+		this.fastRenderRoot = component;
+		this.previousFastRenderRootLineCount = undefined;
+	}
+
+	invalidateFastRender(): void {
+		this.previousFastRenderRootLineCount = undefined;
+	}
+
+	requestFastRender(): void {
+		if (this.fastRenderRoot && this.previousLines.length > 0 && this.overlayStack.length === 0) {
+			this.fastRenderPending = true;
+		}
+		this.requestRender();
 	}
 
 	setFocus(component: Component | null): void {
@@ -478,6 +498,9 @@ export class TUI extends Container {
 			this.hardwareCursorRow = 0;
 			this.maxLinesRendered = 0;
 			this.previousViewportTop = 0;
+			this.previousFastRenderRootLineCount = undefined;
+			this.previousRenderHadOverlays = false;
+			this.fastRenderPending = false;
 			if (this.renderTimer) {
 				clearTimeout(this.renderTimer);
 				this.renderTimer = undefined;
@@ -885,6 +908,34 @@ export class TUI extends Container {
 		return null;
 	}
 
+	private renderWithFastRoot(width: number): string[] {
+		const root = this.fastRenderRoot;
+		if (!root || this.previousFastRenderRootLineCount === undefined) return this.render(width);
+
+		const currentRootLines = root.render(width);
+		const previousRootLineCount = this.previousFastRenderRootLineCount;
+		if (previousRootLineCount < 0 || previousRootLineCount > this.previousLines.length) return this.render(width);
+		const prefixLength = this.previousLines.length - previousRootLineCount;
+		const rootStart = Math.max(0, this.previousLines.length - previousRootLineCount);
+		const previousRootLines = this.previousLines.slice(rootStart);
+		const currentRootLinesWithResets = currentRootLines.map(
+			(line) => normalizeTerminalOutput(line) + TUI.SEGMENT_RESET,
+		);
+		if (previousRootLines.length !== currentRootLinesWithResets.length) return this.render(width);
+		let hasStableLine = false;
+		for (let i = 0; i < previousRootLines.length; i++) {
+			if (previousRootLines[i] === currentRootLinesWithResets[i]) {
+				hasStableLine = true;
+				break;
+			}
+		}
+		if (!hasStableLine) return this.render(width);
+		const prefix = this.previousLines
+			.slice(0, prefixLength)
+			.map((line) => (line.endsWith(TUI.SEGMENT_RESET) ? line.slice(0, -TUI.SEGMENT_RESET.length) : line));
+		return [...prefix, ...currentRootLines];
+	}
+
 	private doRender(): void {
 		if (this.stopped) return;
 		const width = this.terminal.columns;
@@ -902,19 +953,34 @@ export class TUI extends Container {
 		};
 
 		// Render all components to get new lines
-		let newLines = this.render(width);
+		const canUseFastRender =
+			this.fastRenderPending &&
+			this.fastRenderRoot !== undefined &&
+			this.previousLines.length > 0 &&
+			this.previousWidth === width &&
+			this.previousHeight === height &&
+			this.overlayStack.length === 0 &&
+			!this.previousRenderHadOverlays &&
+			!widthChanged &&
+			!heightChanged;
+		let newLines = canUseFastRender ? this.renderWithFastRoot(width) : this.render(width);
+		this.fastRenderPending = false;
 
 		// Composite overlays into the rendered lines (before differential compare)
 		if (this.overlayStack.length > 0) {
 			newLines = this.compositeOverlays(newLines, width, height);
 		}
 
+		const renderHadOverlays = this.overlayStack.length > 0;
+		const fastRenderRootLineCount = this.fastRenderRoot?.render(width).length;
+
 		// Extract cursor position before applying line resets (marker must be found first)
 		const cursorPos = this.extractCursorPosition(newLines, height);
 
 		newLines = this.applyLineResets(newLines);
 
-		// Helper to clear scrollback and viewport and render all new lines
+		// Helper to clear scrollback and viewport and render all new lines.
+		// Used for first render and terminal size changes where the terminal buffer must be rebuilt.
 		const fullRender = (clear: boolean): void => {
 			this.fullRedrawCount += 1;
 			let buffer = "\x1b[?2026h"; // Begin synchronized output
@@ -939,6 +1005,37 @@ export class TUI extends Container {
 			this.previousLines = newLines;
 			this.previousWidth = width;
 			this.previousHeight = height;
+			this.previousFastRenderRootLineCount = fastRenderRootLineCount;
+			this.previousRenderHadOverlays = renderHadOverlays;
+		};
+
+		// Helper to repaint only the visible viewport. This avoids replaying a long session
+		// through the terminal when off-screen history changes or grows.
+		const viewportRender = (): void => {
+			this.fullRedrawCount += 1;
+			const newViewportTop = Math.max(0, Math.max(height, newLines.length) - height);
+			const visibleLines = newLines.slice(newViewportTop, newViewportTop + height);
+			let buffer = "\x1b[?2026h";
+			const currentScreenRow = Math.max(0, Math.min(height - 1, this.hardwareCursorRow - prevViewportTop));
+			if (currentScreenRow > 0) buffer += `\x1b[${currentScreenRow}A`;
+			buffer += "\r";
+			for (let i = 0; i < height; i++) {
+				if (i > 0) buffer += "\x1b[1B\r";
+				buffer += "\x1b[2K";
+				if (i < visibleLines.length) buffer += visibleLines[i];
+			}
+			buffer += "\x1b[?2026l";
+			this.terminal.write(buffer);
+			this.cursorRow = Math.max(0, newLines.length - 1);
+			this.hardwareCursorRow = newViewportTop + Math.min(Math.max(visibleLines.length - 1, 0), height - 1);
+			this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+			this.previousViewportTop = newViewportTop;
+			this.positionHardwareCursor(cursorPos, newLines.length);
+			this.previousLines = newLines;
+			this.previousWidth = width;
+			this.previousHeight = height;
+			this.previousFastRenderRootLineCount = fastRenderRootLineCount;
+			this.previousRenderHadOverlays = renderHadOverlays;
 		};
 
 		const debugRedraw = process.env.PI_DEBUG_REDRAW === "1";
@@ -981,22 +1078,37 @@ export class TUI extends Container {
 			return;
 		}
 
-		// Find first and last changed lines
+		// Find first and last changed lines. The common typing path only changes the visible
+		// editor/footer rows at the bottom of a long session, so scan the visible viewport
+		// first and avoid an O(total history) comparison on every keypress.
 		let firstChanged = -1;
 		let lastChanged = -1;
-		const maxLines = Math.max(newLines.length, this.previousLines.length);
-		for (let i = 0; i < maxLines; i++) {
-			const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
-			const newLine = i < newLines.length ? newLines[i] : "";
-
-			if (oldLine !== newLine) {
-				if (firstChanged === -1) {
-					firstChanged = i;
+		const appendedLines = newLines.length > this.previousLines.length;
+		const sameLogicalLength = newLines.length === this.previousLines.length;
+		if (sameLogicalLength && viewportTop === prevViewportTop) {
+			const viewportEnd = Math.min(newLines.length, viewportTop + height);
+			for (let i = viewportTop; i < viewportEnd; i++) {
+				if (this.previousLines[i] !== newLines[i]) {
+					if (firstChanged === -1) {
+						firstChanged = i;
+					}
+					lastChanged = i;
 				}
-				lastChanged = i;
+			}
+		} else {
+			const maxLines = Math.max(newLines.length, this.previousLines.length);
+			for (let i = 0; i < maxLines; i++) {
+				const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
+				const newLine = i < newLines.length ? newLines[i] : "";
+
+				if (oldLine !== newLine) {
+					if (firstChanged === -1) {
+						firstChanged = i;
+					}
+					lastChanged = i;
+				}
 			}
 		}
-		const appendedLines = newLines.length > this.previousLines.length;
 		if (appendedLines) {
 			if (firstChanged === -1) {
 				firstChanged = this.previousLines.length;
@@ -1054,12 +1166,15 @@ export class TUI extends Container {
 			this.previousLines = newLines;
 			this.previousWidth = width;
 			this.previousHeight = height;
+			this.previousFastRenderRootLineCount = fastRenderRootLineCount;
+			this.previousRenderHadOverlays = renderHadOverlays;
 			this.previousViewportTop = prevViewportTop;
 			return;
 		}
 
 		// Differential rendering can only touch what was actually visible.
-		// If the first changed line is above the previous viewport, we need a full redraw.
+		// If off-screen history changed but the viewport content changed too, repaint only
+		// the visible viewport instead of replaying the full scrollback.
 		if (firstChanged < prevViewportTop) {
 			if (newLines.length === this.previousLines.length) {
 				if (lastChanged < prevViewportTop) {
@@ -1067,13 +1182,15 @@ export class TUI extends Container {
 					this.previousLines = newLines;
 					this.previousWidth = width;
 					this.previousHeight = height;
+					this.previousFastRenderRootLineCount = fastRenderRootLineCount;
+					this.previousRenderHadOverlays = renderHadOverlays;
 					this.previousViewportTop = prevViewportTop;
 					return;
 				}
 				firstChanged = prevViewportTop;
 			} else {
-				logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
-				fullRender(true);
+				logRedraw(`viewport repaint for off-screen change (${firstChanged} < ${prevViewportTop})`);
+				viewportRender();
 				return;
 			}
 		}
@@ -1222,6 +1339,8 @@ export class TUI extends Container {
 		this.previousLines = newLines;
 		this.previousWidth = width;
 		this.previousHeight = height;
+		this.previousFastRenderRootLineCount = fastRenderRootLineCount;
+		this.previousRenderHadOverlays = renderHadOverlays;
 	}
 
 	/**

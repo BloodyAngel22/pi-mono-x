@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Container, getKeybindings, matchesKey, visibleWidth } from "@mariozechner/pi-tui";
+import { Container, getKeybindings, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 
 /**
  * Ask-user extension: provides the `ask_user` tool so the agent can pause and
@@ -176,12 +176,11 @@ export default function (pi: ExtensionAPI): void {
 						const root = new Container();
 
 						const render = (width: number): string[] => {
+							const fit = (line: string) => truncateToWidth(line, Math.max(0, width), "", true);
 							const lines: string[] = [""];
 							// Question (rendered as plain text for simplicity)
 							const qLine = `  ${question}`;
-							lines.push(
-								thm.bold(qLine.length > width - 2 ? qLine.slice(0, width - 5) + "…" : qLine),
-							);
+							lines.push(fit(thm.bold(qLine)));
 							lines.push("");
 
 							// Options
@@ -195,8 +194,7 @@ export default function (pi: ExtensionAPI): void {
 									? thm.bold(options[i])
 									: thm.fg("dim", options[i] ?? "");
 								const line = ` ${pointer} ${cbStyled} ${optText}`;
-								const pad = " ".repeat(Math.max(0, width - visibleWidth(line)));
-								lines.push(line + pad);
+								lines.push(fit(line));
 							}
 
 							// Free-text input row
@@ -206,7 +204,7 @@ export default function (pi: ExtensionAPI): void {
 								customText ||
 								(cursorInInput ? thm.fg("dim", "type here…") : "");
 							const inputLine = ` ${inputPointer} ${inputLabel}${inputVal}`;
-							lines.push(inputLine + " ".repeat(Math.max(0, width - visibleWidth(inputLine))));
+							lines.push(fit(inputLine));
 
 							// Hint
 							lines.push("");
@@ -214,7 +212,7 @@ export default function (pi: ExtensionAPI): void {
 								"dim",
 								"  ↑↓ navigate  Space select  Enter confirm  Esc cancel",
 							);
-							lines.push(hint + " ".repeat(Math.max(0, width - visibleWidth(hint))));
+							lines.push(fit(hint));
 
 							return lines;
 						};
