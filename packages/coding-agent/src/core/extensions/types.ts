@@ -131,6 +131,13 @@ export interface ExtensionUIContext {
 	/** Show a text input dialog. */
 	input(title: string, placeholder?: string, opts?: ExtensionUIDialogOptions): Promise<string | undefined>;
 
+	askUser(
+		question: string,
+		options?: string[],
+		allowMultiple?: boolean,
+		opts?: ExtensionUIDialogOptions,
+	): Promise<string | undefined>;
+
 	/** Show a notification to the user. */
 	notify(message: string, type?: "info" | "warning" | "error"): void;
 

@@ -10,6 +10,7 @@ import type { ImageContent, Model } from "@mariozechner/pi-ai";
 import type { SessionStats } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
+import type { SessionTreeNode } from "../../core/session-manager.js";
 import type { SourceInfo } from "../../core/source-info.js";
 
 // ============================================================================
@@ -21,11 +22,15 @@ export type RpcCommand =
 	| { id?: string; type: "prompt"; message: string; images?: ImageContent[]; streamingBehavior?: "steer" | "followUp" }
 	| { id?: string; type: "steer"; message: string; images?: ImageContent[] }
 	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
+	| { id?: string; type: "btw"; question: string }
 	| { id?: string; type: "abort" }
 	| { id?: string; type: "new_session"; parentSession?: string }
 
 	// State
 	| { id?: string; type: "get_state" }
+	| { id?: string; type: "cd"; path: string }
+	| { id?: string; type: "pwd" }
+	| { id?: string; type: "ls"; path?: string }
 
 	// Model
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
@@ -64,12 +69,17 @@ export type RpcCommand =
 			customInstructions?: string;
 			replaceInstructions?: boolean;
 			label?: string;
+			exact?: boolean;
 	  }
 	| { id?: string; type: "fork"; entryId: string; position?: "at" | "before" }
 	| { id?: string; type: "clone" }
 	| { id?: string; type: "get_fork_messages" }
 	| { id?: string; type: "get_last_assistant_text" }
 	| { id?: string; type: "set_session_name"; name: string }
+	| { id?: string; type: "get_file_checkpoint_status" }
+	| { id?: string; type: "get_file_checkpoint_turn_status"; turnIndex: number }
+	| { id?: string; type: "restore_file_changes_to_turn"; turnIndex: number }
+	| { id?: string; type: "get_session_tree" }
 
 	// Messages
 	| { id?: string; type: "get_messages" }
@@ -88,7 +98,7 @@ export interface RpcSlashCommand {
 	/** Human-readable description */
 	description?: string;
 	/** What kind of command this is */
-	source: "extension" | "prompt" | "skill";
+	source: "extension" | "markdown" | "prompt" | "skill";
 	/** Source metadata for the owning resource */
 	sourceInfo: SourceInfo;
 }
@@ -108,8 +118,12 @@ export interface RpcSessionState {
 	sessionId: string;
 	sessionName?: string;
 	autoCompactionEnabled: boolean;
+	autoRetryEnabled: boolean;
+	isRetrying: boolean;
+	retryAttempt: number;
 	messageCount: number;
 	pendingMessageCount: number;
+	cwd?: string;
 }
 
 // ============================================================================
@@ -122,11 +136,27 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "prompt"; success: true }
 	| { id?: string; type: "response"; command: "steer"; success: true }
 	| { id?: string; type: "response"; command: "follow_up"; success: true }
+	| { id?: string; type: "response"; command: "btw"; success: true; data: { answer: string } }
 	| { id?: string; type: "response"; command: "abort"; success: true }
 	| { id?: string; type: "response"; command: "new_session"; success: true; data: { cancelled: boolean } }
 
 	// State
 	| { id?: string; type: "response"; command: "get_state"; success: true; data: RpcSessionState }
+	| {
+			id?: string;
+			type: "response";
+			command: "cd";
+			success: true;
+			data: { cwd: string; displayPath: string; entries: string };
+	  }
+	| { id?: string; type: "response"; command: "pwd"; success: true; data: { cwd: string } }
+	| {
+			id?: string;
+			type: "response";
+			command: "ls";
+			success: true;
+			data: { path: string; displayPath: string; entries: string };
+	  }
 
 	// Model
 	| {
@@ -182,8 +212,36 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "export_html"; success: true; data: { path: string } }
 	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { cancelled: boolean } }
 	| { id?: string; type: "response"; command: "navigate_tree"; success: true; data: { cancelled: boolean } }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_session_tree";
+			success: true;
+			data: { tree: SessionTreeNode[]; leafId: string | null };
+	  }
 	| { id?: string; type: "response"; command: "fork"; success: true; data: { text: string; cancelled: boolean } }
 	| { id?: string; type: "response"; command: "clone"; success: true; data: { cancelled: boolean } }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_file_checkpoint_status";
+			success: true;
+			data: { modified: string[]; created: string[] } | null;
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_file_checkpoint_turn_status";
+			success: true;
+			data: { modified: string[]; created: string[] } | null;
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "restore_file_changes_to_turn";
+			success: true;
+			data: { restored: string[]; deleted: string[]; errors: string[] } | null;
+	  }
 	| {
 			id?: string;
 			type: "response";
@@ -222,6 +280,22 @@ export type RpcResponse =
 /** Emitted when an extension needs user input */
 export type RpcExtensionUIRequest =
 	| { type: "extension_ui_request"; id: string; method: "select"; title: string; options: string[]; timeout?: number }
+	| {
+			type: "extension_ui_request";
+			id: string;
+			method: "askUser";
+			question: string;
+			options: string[];
+			allowMultiple: boolean;
+			timeout?: number;
+	  }
+	| {
+			type: "extension_ui_request";
+			id: string;
+			method: "permission";
+			permissionType: "bash" | "file" | "mcp";
+			permissionValue: string;
+	  }
 	| { type: "extension_ui_request"; id: string; method: "confirm"; title: string; message: string; timeout?: number }
 	| {
 			type: "extension_ui_request";
@@ -264,6 +338,13 @@ export type RpcExtensionUIRequest =
 /** Response to an extension UI request */
 export type RpcExtensionUIResponse =
 	| { type: "extension_ui_response"; id: string; value: string }
+	| {
+			type: "extension_ui_response";
+			id: string;
+			decision: "allow-once" | "allow-always" | "deny-once" | "deny-always";
+			scope?: "local" | "global" | "session";
+			match?: string;
+	  }
 	| { type: "extension_ui_response"; id: string; confirmed: boolean }
 	| { type: "extension_ui_response"; id: string; cancelled: true };
 

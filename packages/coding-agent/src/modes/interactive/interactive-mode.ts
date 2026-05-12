@@ -1987,6 +1987,8 @@ export class InteractiveMode {
 			select: (title, options, opts) => this.showExtensionSelector(title, options, opts),
 			confirm: (title, message, opts) => this.showExtensionConfirm(title, message, opts),
 			input: (title, placeholder, opts) => this.showExtensionInput(title, placeholder, opts),
+			askUser: (question, options, allowMultiple, opts) =>
+				this.showExtensionAskUser(question, options, allowMultiple, opts),
 			notify: (message, type) => this.showExtensionNotify(message, type),
 			onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),
 			requestRender: () => this.ui.requestRender(),
@@ -2100,6 +2102,40 @@ export class InteractiveMode {
 	): Promise<boolean> {
 		const result = await this.showExtensionSelector(`${title}\n${message}`, ["Yes", "No"], opts);
 		return result === "Yes";
+	}
+
+	private async showExtensionAskUser(
+		question: string,
+		options: string[] = [],
+		allowMultiple = false,
+		opts?: ExtensionUIDialogOptions,
+	): Promise<string | undefined> {
+		if (options.length === 0) {
+			return this.showExtensionInput(question, "Type your answer", opts);
+		}
+		if (!allowMultiple) {
+			const customOption = "Type custom answer";
+			const selected = await this.showExtensionSelector(question, [...options, customOption], opts);
+			if (!selected) return undefined;
+			if (selected === customOption) {
+				return this.showExtensionInput(question, "Type your answer", opts);
+			}
+			return selected;
+		}
+		const selected: string[] = [];
+		let remaining = [...options];
+		while (remaining.length > 0) {
+			const choice = await this.showExtensionSelector(question, [...remaining, "Done", "Type custom answer"], opts);
+			if (!choice || choice === "Done") break;
+			if (choice === "Type custom answer") {
+				const custom = await this.showExtensionInput(question, "Type your answer", opts);
+				if (custom?.trim()) selected.push(custom.trim());
+				break;
+			}
+			selected.push(choice);
+			remaining = remaining.filter((option) => option !== choice);
+		}
+		return selected.join(", ") || undefined;
 	}
 
 	private async promptForMissingSessionCwd(error: MissingSessionCwdError): Promise<string | undefined> {
