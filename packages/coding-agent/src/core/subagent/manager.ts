@@ -180,9 +180,12 @@ export class SubagentManager {
 				`\n\nCurrent working directory: ${options.cwd}` +
 				`\nCurrent date: ${new Date().toISOString().slice(0, 10)}`;
 		}
+		systemPrompt +=
+			"\n\nCodebase search policy: if you need to locate relevant code and the exact file is not already known, call fast_context first. " +
+			"Use the returned files/ranges to choose targeted read calls. Avoid long broad exploration with ls/find/grep/read before fast_context.";
 
 		const toolNames = options.tools ??
-			options.agent?.tools ?? ["read", "bash", "edit", "write", "grep", "find", "ls"];
+			options.agent?.tools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "fast_context"];
 
 		// Filter MCP tools by agent glob patterns
 		const customTools: ToolDefinition[] = [];

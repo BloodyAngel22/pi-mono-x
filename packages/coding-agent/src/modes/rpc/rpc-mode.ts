@@ -18,6 +18,7 @@ import * as path from "node:path";
 import { completeSimple, type Message } from "@mariozechner/pi-ai";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "../../core/auth-guidance.js";
+import { fastContextSearch } from "../../core/context-search.js";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -441,6 +442,22 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	await rebindSession();
 	registerSignalHandlers();
 
+	// -----------------------------------------------------------------
+	// Fast Context helper
+	// -----------------------------------------------------------------
+	async function runFastContext(query: string) {
+		const ui = createExtensionUIContext();
+		ui.setStatus("fast-context", "searching...");
+		try {
+			const result = await fastContextSearch(session.activeCwd, query, { maxFiles: 12, includeSnippets: false });
+			ui.setStatus("fast-context", `done: ${result.files.length} files`);
+			return result;
+		} catch (e) {
+			ui.setStatus("fast-context", undefined);
+			throw e;
+		}
+	}
+
 	// Handle a single command
 	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
 		const id = command.id;
@@ -451,11 +468,12 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "prompt": {
+				const message = command.message;
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
 				let preflightSucceeded = false;
 				void session
-					.prompt(command.message, {
+					.prompt(message, {
 						images: command.images,
 						streamingBehavior: command.streamingBehavior,
 						source: "rpc",
@@ -527,6 +545,19 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					.join("")
 					.trim();
 				return success(id, "btw", { answer: text || "(no text response)" });
+			}
+
+			case "fast_context": {
+				const query = command.query.trim();
+				if (!query) {
+					return error(id, "fast_context", "Usage: fast_context <query>");
+				}
+				try {
+					const result = await runFastContext(query);
+					return success(id, "fast_context", result);
+				} catch (e) {
+					return error(id, "fast_context", (e as Error).message);
+				}
 			}
 
 			case "abort": {

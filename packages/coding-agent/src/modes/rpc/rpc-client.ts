@@ -10,6 +10,7 @@ import type { ImageContent } from "@mariozechner/pi-ai";
 import type { SessionStats } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
+import type { FastContextResult } from "../../core/context-search.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
 import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.js";
 
@@ -313,6 +314,14 @@ export class RpcClient {
 	 */
 	async getSessionStats(): Promise<SessionStats> {
 		const response = await this.send({ type: "get_session_stats" });
+		return this.getData(response);
+	}
+
+	/**
+	 * Search current codebase for relevant files/ranges.
+	 */
+	async fastContext(query: string): Promise<FastContextResult> {
+		const response = await this.send({ type: "fast_context", query });
 		return this.getData(response);
 	}
 
