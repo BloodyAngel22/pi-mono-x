@@ -26,6 +26,7 @@ import type {
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.js";
 import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
+import { getGlobalSubagentManager } from "../../core/subagent/index.js";
 import { createFastFetchToolDefinition } from "../../core/tools/index.js";
 import { getTextOutput } from "../../core/tools/render-utils.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
@@ -931,6 +932,16 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				}
 
 				return success(id, "get_commands", { commands });
+			}
+
+			// =================================================================
+			// Sub-agents
+			// =================================================================
+
+			case "get_subagent_tasks": {
+				const mgr = getGlobalSubagentManager();
+				const tasks = mgr ? [...mgr.tasks.values()] : [];
+				return success(id, "get_subagent_tasks", { tasks });
 			}
 
 			default: {

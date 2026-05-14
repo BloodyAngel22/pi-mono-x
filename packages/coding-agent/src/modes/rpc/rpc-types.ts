@@ -13,6 +13,7 @@ import type { CompactionResult } from "../../core/compaction/index.js";
 import type { FastContextResult } from "../../core/context-search.js";
 import type { SessionTreeNode } from "../../core/session-manager.js";
 import type { SourceInfo } from "../../core/source-info.js";
+import type { SubagentTask } from "../../core/subagent/types.js";
 import type { FastFetchToolDetails } from "../../core/tools/index.js";
 
 // ============================================================================
@@ -96,7 +97,10 @@ export type RpcCommand =
 	| { id?: string; type: "get_messages" }
 
 	// Commands (available for invocation via prompt)
-	| { id?: string; type: "get_commands" };
+	| { id?: string; type: "get_commands" }
+
+	// Sub-agents
+	| { id?: string; type: "get_subagent_tasks" };
 
 // ============================================================================
 // RPC Slash Command (for get_commands response)
@@ -287,6 +291,15 @@ export type RpcResponse =
 			command: "get_commands";
 			success: true;
 			data: { commands: RpcSlashCommand[] };
+	  }
+
+	// Sub-agents
+	| {
+			id?: string;
+			type: "response";
+			command: "get_subagent_tasks";
+			success: true;
+			data: { tasks: SubagentTask[] };
 	  }
 
 	// Error response (any command can fail)

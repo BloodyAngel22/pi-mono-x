@@ -61,6 +61,9 @@ export class SubagentStatusComponent implements Component {
 
 		for (const task of tasks) {
 			lines.push(this.renderTask(task, width));
+			for (const activity of task.recentActivities ?? []) {
+				lines.push(this.renderActivity(activity, width));
+			}
 		}
 
 		return lines;
@@ -85,6 +88,14 @@ export class SubagentStatusComponent implements Component {
 					: "";
 
 		const line = `${dot} ${theme.fg("dim", label)} ${elapsed}${statusSuffix}`;
+		return this.padAndTruncate(line, width);
+	}
+
+	private renderActivity(activity: string, width: number): string {
+		return this.padAndTruncate(theme.fg("dim", `  ↳ ${activity}`), width);
+	}
+
+	private padAndTruncate(line: string, width: number): string {
 		const lineVisible = visibleWidth(line);
 		const padded = line + " ".repeat(Math.max(0, width - lineVisible));
 		return truncateToWidth(padded, width, theme.fg("dim", "..."));

@@ -11,6 +11,7 @@ import type { SessionStats } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import type { FastContextResult } from "../../core/context-search.js";
+import type { SubagentTask } from "../../core/subagent/types.js";
 import type { FastFetchToolDetails } from "../../core/tools/index.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
 import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.js";
@@ -409,6 +410,14 @@ export class RpcClient {
 	async getCommands(): Promise<RpcSlashCommand[]> {
 		const response = await this.send({ type: "get_commands" });
 		return this.getData<{ commands: RpcSlashCommand[] }>(response).commands;
+	}
+
+	/**
+	 * Get current sub-agent tasks with recent activities.
+	 */
+	async getSubagentTasks(): Promise<SubagentTask[]> {
+		const response = await this.send({ type: "get_subagent_tasks" });
+		return this.getData<{ tasks: SubagentTask[] }>(response).tasks;
 	}
 
 	// =========================================================================

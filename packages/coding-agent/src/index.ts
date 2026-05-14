@@ -232,6 +232,7 @@ export {
 export { createSyntheticSourceInfo } from "./core/source-info.js";
 // Subagent system
 export {
+	getGlobalSubagentManager,
 	loadAgents,
 	type SubagentConfig,
 	type SubagentEvent,
@@ -242,6 +243,7 @@ export {
 	type SubagentSessionFactory,
 	type SubagentTask,
 	type SubagentTaskStatus,
+	setGlobalSubagentManager,
 } from "./core/subagent/index.js";
 // Tools
 export {
