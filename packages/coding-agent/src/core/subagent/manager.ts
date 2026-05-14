@@ -34,6 +34,7 @@ export type SubagentSessionFactory = (options: {
 		errorMessage?: string;
 	}>;
 	subscribe(listener: (event: { type: string; text?: string }) => void): () => void;
+	abort?(): void;
 }>;
 
 export class SubagentManager {
@@ -111,7 +112,7 @@ export class SubagentManager {
 		this._emit({ type: "task_start", task: { ...task } });
 
 		try {
-			const result = await this._execute(options);
+			const result = await this._execute(options, abortController.signal);
 
 			task.status = "done";
 			task.completedAt = Date.now();
@@ -166,7 +167,7 @@ export class SubagentManager {
 		);
 	}
 
-	private async _execute(options: SubagentRunOptions): Promise<SubagentResult> {
+	private async _execute(options: SubagentRunOptions, signal: AbortSignal): Promise<SubagentResult> {
 		let systemPrompt: string;
 		if (options.agent?.systemPrompt) {
 			systemPrompt =
@@ -182,10 +183,11 @@ export class SubagentManager {
 		}
 		systemPrompt +=
 			"\n\nCodebase search policy: if you need to locate relevant code and the exact file is not already known, call fast_context first. " +
-			"Use the returned files/ranges to choose targeted read calls. Avoid long broad exploration with ls/find/grep/read before fast_context.";
+			"Use the returned files/ranges to choose targeted read calls. Avoid long broad exploration with ls/find/grep/read before fast_context." +
+			"\nWeb fetch policy: use fast_fetch for quick web lookups or URL reads when MCP web tools are unavailable, slow, or unnecessary.";
 
 		const toolNames = options.tools ??
-			options.agent?.tools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "fast_context"];
+			options.agent?.tools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "fast_context", "fast_fetch"];
 
 		// Filter MCP tools by agent glob patterns
 		const customTools: ToolDefinition[] = [];
@@ -219,8 +221,42 @@ export class SubagentManager {
 			}
 		});
 
+		const throwAbortReason = (): never => {
+			const reason = signal.reason;
+			if (reason instanceof Error) throw reason;
+			if (typeof reason === "string" && reason.length > 0) throw new Error(reason);
+			throw new Error("Sub-agent aborted");
+		};
+
+		const abortPrompt = () => {
+			session.abort?.();
+		};
+
+		let cleanupAbortListener: (() => void) | undefined;
+
 		try {
-			await session.prompt(options.instructions);
+			if (signal.aborted) {
+				abortPrompt();
+				throwAbortReason();
+			}
+
+			const abortPromise = new Promise<never>((_resolve, reject) => {
+				const onAbort = () => {
+					abortPrompt();
+					const reason = signal.reason;
+					if (reason instanceof Error) {
+						reject(reason);
+					} else if (typeof reason === "string" && reason.length > 0) {
+						reject(new Error(reason));
+					} else {
+						reject(new Error("Sub-agent aborted"));
+					}
+				};
+				signal.addEventListener("abort", onAbort, { once: true });
+				cleanupAbortListener = () => signal.removeEventListener("abort", onAbort);
+			});
+
+			await Promise.race([session.prompt(options.instructions), abortPromise]);
 
 			const messages = session.getMessages();
 			let resultText = "";
@@ -260,6 +296,7 @@ export class SubagentManager {
 				savedTokens,
 			};
 		} finally {
+			cleanupAbortListener?.();
 			unsubscribe();
 		}
 	}

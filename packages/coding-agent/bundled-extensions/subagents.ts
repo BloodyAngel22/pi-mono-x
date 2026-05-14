@@ -100,6 +100,7 @@ export default function (pi: ExtensionAPI): void {
 
 			return {
 				prompt: (text: string) => session.prompt(text),
+				abort: () => session.agent.abort(),
 				getMessages: () =>
 					session.state.messages.map((m: any) => ({
 						role: m.role as string,
@@ -216,7 +217,7 @@ export default function (pi: ExtensionAPI): void {
 			required: ["description", "instructions"],
 		} as any,
 		executionMode: "parallel",
-		execute: async (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) => {
+		execute: async (_toolCallId: string, params: any, signal: AbortSignal | undefined, _onUpdate: any, ctx: any) => {
 			const mgr = getManager();
 			const cwd: string = ctx?.cwd ?? process.cwd();
 
@@ -238,6 +239,7 @@ export default function (pi: ExtensionAPI): void {
 					agent: agentConfig,
 					parentMcpTools: mcpToolDefs.length > 0 ? mcpToolDefs : undefined,
 					model: ctx?.model,
+					signal,
 				});
 
 				return {

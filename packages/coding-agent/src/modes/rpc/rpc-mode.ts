@@ -26,6 +26,8 @@ import type {
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.js";
 import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
+import { createFastFetchToolDefinition } from "../../core/tools/index.js";
+import { getTextOutput } from "../../core/tools/render-utils.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { type Theme, theme } from "../interactive/theme/theme.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
@@ -443,7 +445,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	registerSignalHandlers();
 
 	// -----------------------------------------------------------------
-	// Fast Context helper
+	// Fast Context / Fetch helpers
 	// -----------------------------------------------------------------
 	async function runFastContext(query: string) {
 		const ui = createExtensionUIContext();
@@ -454,6 +456,33 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			return result;
 		} catch (e) {
 			ui.setStatus("fast-context", undefined);
+			throw e;
+		}
+	}
+
+	async function runFastFetch(command: Extract<RpcCommand, { type: "fast_fetch" }>) {
+		const ui = createExtensionUIContext();
+		ui.setStatus("fast-fetch", "fetching...");
+		try {
+			const tool = createFastFetchToolDefinition(session.activeCwd, {
+				settings: session.settingsManager.getFastFetchSettings(),
+			});
+			const result = await tool.execute(
+				"rpc-fast-fetch",
+				{
+					query: command.query,
+					mode: command.mode,
+					maxResults: command.maxResults,
+					timeoutMs: command.timeoutMs,
+				},
+				undefined,
+				undefined,
+				undefined as never,
+			);
+			ui.setStatus("fast-fetch", `done: ${result.details?.status ?? "ok"}`);
+			return { text: getTextOutput(result, false), details: result.details };
+		} catch (e) {
+			ui.setStatus("fast-fetch", undefined);
 			throw e;
 		}
 	}
@@ -557,6 +586,19 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					return success(id, "fast_context", result);
 				} catch (e) {
 					return error(id, "fast_context", (e as Error).message);
+				}
+			}
+
+			case "fast_fetch": {
+				const query = command.query.trim();
+				if (!query) {
+					return error(id, "fast_fetch", "Usage: fast_fetch <query-or-url>");
+				}
+				try {
+					const result = await runFastFetch(command);
+					return success(id, "fast_fetch", result);
+				} catch (e) {
+					return error(id, "fast_fetch", (e as Error).message);
 				}
 			}
 

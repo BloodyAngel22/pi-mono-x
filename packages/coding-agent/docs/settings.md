@@ -139,6 +139,38 @@ When a provider requests a retry delay longer than `retry.provider.maxRetryDelay
 | `images.autoResize` | boolean | `true` | Resize images to 2000x2000 max |
 | `images.blockImages` | boolean | `false` | Block all images from being sent to LLM |
 
+### Fast Fetch
+
+`fast_fetch` is a built-in web search/fetch tool that works without MCP servers. It uses a configurable HTTP search endpoint and can also fetch direct URLs.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `fastFetch.searchUrl` | string | `https://html.duckduckgo.com/html/` | Search endpoint URL |
+| `fastFetch.queryParam` | string | `q` | Query parameter name appended to `searchUrl` |
+| `fastFetch.headers` | object | - | Headers sent with requests |
+| `fastFetch.timeoutMs` | number | `20000` | Request timeout in milliseconds |
+| `fastFetch.maxBytes` | number | `65536` | Maximum response bytes returned to the model |
+| `fastFetch.maxResults` | number | `5` | Default number of search results/snippets to keep |
+
+Example with a SearXNG instance:
+
+```json
+{
+  "fastFetch": {
+    "searchUrl": "https://searx.example.com/search",
+    "queryParam": "q",
+    "headers": {
+      "Accept": "text/html"
+    },
+    "timeoutMs": 10000,
+    "maxBytes": 65536,
+    "maxResults": 5
+  }
+}
+```
+
+> **Note:** For web search, prefer using MCP tools (e.g., `searxng_web_search`, `searxng_web_url_read`) over `fast_fetch`. MCP tools are generally more reliable and provide more accurate results. Use `fast_fetch` as a fallback when MCP is unavailable or slow.
+
 ### Shell
 
 | Setting | Type | Default | Description |

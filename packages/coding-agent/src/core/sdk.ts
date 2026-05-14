@@ -20,6 +20,7 @@ import {
 	createBashTool,
 	createCodingTools,
 	createEditTool,
+	createFastFetchTool,
 	createFindTool,
 	createGrepTool,
 	createLsTool,
@@ -119,6 +120,7 @@ export {
 	createGrepTool,
 	createFindTool,
 	createLsTool,
+	createFastFetchTool,
 };
 
 // Helper Functions
@@ -263,7 +265,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = "off";
 	}
 
-	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write", "fast_context"];
+	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write", "fast_context", "fast_fetch"];
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const initialActiveToolNames: string[] = options.tools
 		? [...options.tools]

@@ -65,6 +65,8 @@ import type {
 	BashToolDetails,
 	BashToolInput,
 	EditToolInput,
+	FastFetchToolDetails,
+	FastFetchToolInput,
 	FindToolDetails,
 	FindToolInput,
 	GrepToolDetails,
@@ -811,6 +813,11 @@ export interface LsToolCallEvent extends ToolCallEventBase {
 	input: LsToolInput;
 }
 
+export interface FastFetchToolCallEvent extends ToolCallEventBase {
+	toolName: "fast_fetch";
+	input: FastFetchToolInput;
+}
+
 export interface CustomToolCallEvent extends ToolCallEventBase {
 	toolName: string;
 	input: Record<string, unknown>;
@@ -830,6 +837,7 @@ export type ToolCallEvent =
 	| GrepToolCallEvent
 	| FindToolCallEvent
 	| LsToolCallEvent
+	| FastFetchToolCallEvent
 	| CustomToolCallEvent;
 
 interface ToolResultEventBase {
@@ -875,6 +883,11 @@ export interface LsToolResultEvent extends ToolResultEventBase {
 	details: LsToolDetails | undefined;
 }
 
+export interface FastFetchToolResultEvent extends ToolResultEventBase {
+	toolName: "fast_fetch";
+	details: FastFetchToolDetails | undefined;
+}
+
 export interface CustomToolResultEvent extends ToolResultEventBase {
 	toolName: string;
 	details: unknown;
@@ -889,6 +902,7 @@ export type ToolResultEvent =
 	| GrepToolResultEvent
 	| FindToolResultEvent
 	| LsToolResultEvent
+	| FastFetchToolResultEvent
 	| CustomToolResultEvent;
 
 // Type guards for ToolResultEvent
@@ -912,6 +926,9 @@ export function isFindToolResult(e: ToolResultEvent): e is FindToolResultEvent {
 }
 export function isLsToolResult(e: ToolResultEvent): e is LsToolResultEvent {
 	return e.toolName === "ls";
+}
+export function isFastFetchToolResult(e: ToolResultEvent): e is FastFetchToolResultEvent {
+	return e.toolName === "fast_fetch";
 }
 
 /**
