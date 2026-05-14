@@ -11,6 +11,31 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_CONCURRENT_TASKS = 3;
+const MAX_RECENT_ACTIVITIES = 5;
+
+function formatToolActivity(toolName: string, args: Record<string, unknown>): string {
+	switch (toolName) {
+		case "fast_context":
+			return `fast_context "${String(args.query ?? "?").slice(0, 60)}"`;
+		case "bash":
+			return `bash: ${String(args.command ?? "?").slice(0, 80)}`;
+		case "read":
+			return `read: ${String(args.path ?? "?")}`;
+		case "grep":
+			return `grep: ${String(args.query ?? args.pattern ?? "?").slice(0, 60)}`;
+		case "find":
+			return `find: ${String(args.pattern ?? args.query ?? "?").slice(0, 60)}`;
+		case "write":
+			return `write: ${String(args.path ?? "?")}`;
+		case "edit":
+			return `edit: ${String(args.path ?? "?")}`;
+		case "ls":
+			return `ls: ${String(args.path ?? ".")}`;
+		default:
+			if (toolName.includes("_")) return `mcp: ${toolName}`;
+			return `${toolName}`;
+	}
+}
 
 /**
  * Factory function that creates an AgentSession for a subagent.
@@ -34,6 +59,10 @@ export type SubagentSessionFactory = (options: {
 		errorMessage?: string;
 	}>;
 	subscribe(listener: (event: { type: string; text?: string }) => void): () => void;
+	subscribeAgentEvents?(
+		listener: (event: { type: string; toolName?: string; args?: Record<string, unknown> }) => void,
+	): () => void;
+	abort?(): void;
 }>;
 
 export class SubagentManager {
@@ -111,7 +140,7 @@ export class SubagentManager {
 		this._emit({ type: "task_start", task: { ...task } });
 
 		try {
-			const result = await this._execute(options);
+			const result = await this._execute(options, abortController.signal, task);
 
 			task.status = "done";
 			task.completedAt = Date.now();
@@ -166,7 +195,11 @@ export class SubagentManager {
 		);
 	}
 
-	private async _execute(options: SubagentRunOptions): Promise<SubagentResult> {
+	private async _execute(
+		options: SubagentRunOptions,
+		signal: AbortSignal,
+		task: SubagentTask,
+	): Promise<SubagentResult> {
 		let systemPrompt: string;
 		if (options.agent?.systemPrompt) {
 			systemPrompt =
@@ -180,9 +213,13 @@ export class SubagentManager {
 				`\n\nCurrent working directory: ${options.cwd}` +
 				`\nCurrent date: ${new Date().toISOString().slice(0, 10)}`;
 		}
+		systemPrompt +=
+			"\n\nCodebase search policy: if you need to locate relevant code and the exact file is not already known, call fast_context first. " +
+			"Use the returned files/ranges to choose targeted read calls. Avoid long broad exploration with ls/find/grep/read before fast_context." +
+			"\nWeb fetch policy: use fast_fetch for quick web lookups or URL reads when MCP web tools are unavailable, slow, or unnecessary.";
 
 		const toolNames = options.tools ??
-			options.agent?.tools ?? ["read", "bash", "edit", "write", "grep", "find", "ls"];
+			options.agent?.tools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "fast_context", "fast_fetch"];
 
 		// Filter MCP tools by agent glob patterns
 		const customTools: ToolDefinition[] = [];
@@ -210,14 +247,66 @@ export class SubagentManager {
 			model: options.model,
 		});
 
-		const unsubscribe = session.subscribe((event) => {
-			if (event.type === "message_update" && options.onProgress && event.text) {
-				options.onProgress(event.text);
+		const reportToolActivity = (toolName: string | undefined, args: Record<string, unknown> | undefined) => {
+			if (!toolName || !args) return;
+			const activity = formatToolActivity(toolName, args);
+			if (!task.recentActivities) task.recentActivities = [];
+			task.recentActivities.push(activity);
+			if (task.recentActivities.length > MAX_RECENT_ACTIVITIES) {
+				task.recentActivities = task.recentActivities.slice(-MAX_RECENT_ACTIVITIES);
+			}
+			this._emit({ type: "task_progress", taskId: task.id, chunk: activity });
+			options.onProgress?.(activity);
+		};
+
+		const unsubscribeSession = session.subscribe((event) => {
+			if (event.type === "tool_execution_start") {
+				const e = event as unknown as { toolName: string; args: Record<string, unknown> };
+				reportToolActivity(e.toolName, e.args);
+			}
+		});
+		const unsubscribeAgent = session.subscribeAgentEvents?.((event) => {
+			if (event.type === "tool_execution_start") {
+				reportToolActivity(event.toolName, event.args);
 			}
 		});
 
+		const throwAbortReason = (): never => {
+			const reason = signal.reason;
+			if (reason instanceof Error) throw reason;
+			if (typeof reason === "string" && reason.length > 0) throw new Error(reason);
+			throw new Error("Sub-agent aborted");
+		};
+
+		const abortPrompt = () => {
+			session.abort?.();
+		};
+
+		let cleanupAbortListener: (() => void) | undefined;
+
 		try {
-			await session.prompt(options.instructions);
+			if (signal.aborted) {
+				abortPrompt();
+				throwAbortReason();
+			}
+
+			const abortPromise = new Promise<never>((_resolve, reject) => {
+				const onAbort = () => {
+					abortPrompt();
+					const reason = signal.reason;
+					if (reason instanceof Error) {
+						reject(reason);
+					} else if (typeof reason === "string" && reason.length > 0) {
+						reject(new Error(reason));
+					} else {
+						reject(new Error("Sub-agent aborted"));
+					}
+				};
+				signal.addEventListener("abort", onAbort, { once: true });
+				cleanupAbortListener = () => signal.removeEventListener("abort", onAbort);
+			});
+
+			await Promise.race([session.prompt(options.instructions), abortPromise]);
 
 			const messages = session.getMessages();
 			let resultText = "";
@@ -257,7 +346,20 @@ export class SubagentManager {
 				savedTokens,
 			};
 		} finally {
-			unsubscribe();
+			cleanupAbortListener?.();
+			unsubscribeSession();
+			unsubscribeAgent?.();
 		}
 	}
+}
+
+/** Global registry so RPC mode can access the manager without importing the extension. */
+let _globalManager: SubagentManager | undefined;
+
+export function setGlobalSubagentManager(mgr: SubagentManager | undefined): void {
+	_globalManager = mgr;
+}
+
+export function getGlobalSubagentManager(): SubagentManager | undefined {
+	return _globalManager;
 }

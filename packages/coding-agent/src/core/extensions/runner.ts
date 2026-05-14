@@ -189,6 +189,7 @@ const noOpUIContext: ExtensionUIContext = {
 	select: async () => undefined,
 	confirm: async () => false,
 	input: async () => undefined,
+	askUser: async () => undefined,
 	notify: () => {},
 	onTerminalInput: () => () => {},
 	requestRender: () => {},

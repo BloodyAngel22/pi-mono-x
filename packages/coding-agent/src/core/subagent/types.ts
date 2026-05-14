@@ -19,6 +19,8 @@ export interface SubagentTask {
 	savedTokens: number;
 	result?: string;
 	error?: string;
+	/** Last 5 human-readable activity descriptions (newest last). */
+	recentActivities?: string[];
 }
 
 // ============================================================================

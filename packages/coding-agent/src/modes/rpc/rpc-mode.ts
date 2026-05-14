@@ -12,7 +12,13 @@
  */
 
 import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { completeSimple, type Message } from "@mariozechner/pi-ai";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
+import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "../../core/auth-guidance.js";
+import { fastContextSearch } from "../../core/context-search.js";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -20,6 +26,9 @@ import type {
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.js";
 import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
+import { getGlobalSubagentManager } from "../../core/subagent/index.js";
+import { createFastFetchToolDefinition } from "../../core/tools/index.js";
+import { getTextOutput } from "../../core/tools/render-utils.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { type Theme, theme } from "../interactive/theme/theme.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
@@ -67,6 +76,34 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 	const error = (id: string | undefined, command: string, message: string): RpcResponse => {
 		return { id, type: "response", command, success: false, error: message };
+	};
+
+	const expandHome = (p: string): string => {
+		const h = os.homedir();
+		return p.startsWith("~/") ? h + p.slice(1) : p === "~" ? h : p;
+	};
+
+	const shortPath = (p: string): string => {
+		const h = os.homedir();
+		return p.startsWith(h) ? `~${p.slice(h.length)}` : p;
+	};
+
+	const listDir = (dir: string): string => {
+		try {
+			const all = fs.readdirSync(dir);
+			const shown = all.slice(0, 30);
+			const formatted = shown.map((entry) => {
+				try {
+					return fs.statSync(path.resolve(dir, entry)).isDirectory() ? `${entry}/` : entry;
+				} catch {
+					return entry;
+				}
+			});
+			const suffix = all.length > 30 ? `\n  … (${all.length - 30} more)` : "";
+			return formatted.join("  ") + suffix;
+		} catch {
+			return "(unreadable)";
+		}
 	};
 
 	// Pending extension UI requests waiting for response
@@ -140,6 +177,14 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		input: (title, placeholder, opts) =>
 			createDialogPromise(opts, undefined, { method: "input", title, placeholder, timeout: opts?.timeout }, (r) =>
 				"cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined,
+			),
+
+		askUser: (question, options = [], allowMultiple = false, opts) =>
+			createDialogPromise(
+				opts,
+				undefined,
+				{ method: "askUser", question, options, allowMultiple, timeout: opts?.timeout },
+				(r) => ("cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined),
 			),
 
 		notify(message: string, type?: "info" | "warning" | "error"): void {
@@ -313,6 +358,23 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 	const rebindSession = async (): Promise<void> => {
 		session = runtimeHost.session;
+		session.permissionAsk = async (info) =>
+			createDialogPromise(
+				undefined,
+				{ decision: "deny-once" as const },
+				{ method: "permission", permissionType: info.type, permissionValue: info.value },
+				(response) => {
+					if ("cancelled" in response && response.cancelled) return { decision: "deny-once" as const };
+					if ("decision" in response) {
+						return {
+							decision: response.decision,
+							scope: response.scope,
+							match: response.match,
+						};
+					}
+					return { decision: "deny-once" as const };
+				},
+			);
 		// Set up event routing first so MCP status events reach the frontend
 		// during async initialization (subscribe before bindExtensions resolves).
 		unsubscribe?.();
@@ -383,6 +445,49 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	await rebindSession();
 	registerSignalHandlers();
 
+	// -----------------------------------------------------------------
+	// Fast Context / Fetch helpers
+	// -----------------------------------------------------------------
+	async function runFastContext(query: string) {
+		const ui = createExtensionUIContext();
+		ui.setStatus("fast-context", "searching...");
+		try {
+			const result = await fastContextSearch(session.activeCwd, query, { maxFiles: 12, includeSnippets: false });
+			ui.setStatus("fast-context", `done: ${result.files.length} files`);
+			return result;
+		} catch (e) {
+			ui.setStatus("fast-context", undefined);
+			throw e;
+		}
+	}
+
+	async function runFastFetch(command: Extract<RpcCommand, { type: "fast_fetch" }>) {
+		const ui = createExtensionUIContext();
+		ui.setStatus("fast-fetch", "fetching...");
+		try {
+			const tool = createFastFetchToolDefinition(session.activeCwd, {
+				settings: session.settingsManager.getFastFetchSettings(),
+			});
+			const result = await tool.execute(
+				"rpc-fast-fetch",
+				{
+					query: command.query,
+					mode: command.mode,
+					maxResults: command.maxResults,
+					timeoutMs: command.timeoutMs,
+				},
+				undefined,
+				undefined,
+				undefined as never,
+			);
+			ui.setStatus("fast-fetch", `done: ${result.details?.status ?? "ok"}`);
+			return { text: getTextOutput(result, false), details: result.details };
+		} catch (e) {
+			ui.setStatus("fast-fetch", undefined);
+			throw e;
+		}
+	}
+
 	// Handle a single command
 	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
 		const id = command.id;
@@ -393,11 +498,12 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "prompt": {
+				const message = command.message;
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
 				let preflightSucceeded = false;
 				void session
-					.prompt(command.message, {
+					.prompt(message, {
 						images: command.images,
 						streamingBehavior: command.streamingBehavior,
 						source: "rpc",
@@ -424,6 +530,77 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "follow_up": {
 				await session.followUp(command.message, command.images);
 				return success(id, "follow_up");
+			}
+
+			case "btw": {
+				const question = command.question.trim();
+				if (!question) {
+					return error(id, "btw", "Usage: /btw <question>");
+				}
+				const model = session.model;
+				if (!model) {
+					return error(id, "btw", formatNoModelSelectedMessage());
+				}
+				const auth = await session.modelRegistry.getApiKeyAndHeaders(model);
+				if (!auth.ok || !auth.apiKey) {
+					return error(id, "btw", auth.ok ? formatNoApiKeyFoundMessage(model.provider) : auth.error);
+				}
+				const contextMessages = session.state.messages.filter(
+					(message): message is Message =>
+						message.role === "user" || message.role === "assistant" || message.role === "toolResult",
+				);
+				const messages: Message[] = [
+					...contextMessages,
+					{
+						role: "user",
+						content: `Answer this side question briefly. Do not assume it should affect the ongoing task.\n\n${question}`,
+						timestamp: Date.now(),
+					},
+				];
+				const response = await completeSimple(
+					model,
+					{
+						systemPrompt: session.systemPrompt,
+						messages,
+					},
+					{
+						apiKey: auth.apiKey,
+						headers: auth.headers,
+						reasoning: session.thinkingLevel === "off" ? undefined : session.thinkingLevel,
+					},
+				);
+				const text = response.content
+					.filter((part) => part.type === "text")
+					.map((part) => part.text)
+					.join("")
+					.trim();
+				return success(id, "btw", { answer: text || "(no text response)" });
+			}
+
+			case "fast_context": {
+				const query = command.query.trim();
+				if (!query) {
+					return error(id, "fast_context", "Usage: fast_context <query>");
+				}
+				try {
+					const result = await runFastContext(query);
+					return success(id, "fast_context", result);
+				} catch (e) {
+					return error(id, "fast_context", (e as Error).message);
+				}
+			}
+
+			case "fast_fetch": {
+				const query = command.query.trim();
+				if (!query) {
+					return error(id, "fast_fetch", "Usage: fast_fetch <query-or-url>");
+				}
+				try {
+					const result = await runFastFetch(command);
+					return success(id, "fast_fetch", result);
+				} catch (e) {
+					return error(id, "fast_fetch", (e as Error).message);
+				}
 			}
 
 			case "abort": {
@@ -453,10 +630,55 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					sessionId: session.sessionId,
 					sessionName: session.sessionName,
 					autoCompactionEnabled: session.autoCompactionEnabled,
+					autoRetryEnabled: session.autoRetryEnabled,
+					isRetrying: session.isRetrying,
+					retryAttempt: session.retryAttempt,
 					messageCount: session.messages.length,
 					pendingMessageCount: session.pendingMessageCount,
+					cwd: session.activeCwd,
 				};
 				return success(id, "get_state", state);
+			}
+
+			case "pwd": {
+				return success(id, "pwd", { cwd: session.activeCwd });
+			}
+
+			case "ls": {
+				const base = session.activeCwd;
+				const dir = command.path ? path.resolve(base, expandHome(command.path)) : base;
+				if (!fs.existsSync(dir)) {
+					return error(id, "ls", `ls: no such path: ${dir}`);
+				}
+				return success(id, "ls", { path: dir, displayPath: shortPath(dir), entries: listDir(dir) });
+			}
+
+			case "cd": {
+				const base = session.activeCwd;
+				const arg = command.path.trim();
+				if (!arg) {
+					return success(id, "cd", { cwd: base, displayPath: shortPath(base), entries: listDir(base) });
+				}
+				const target = path.resolve(base, expandHome(arg));
+				if (!fs.existsSync(target)) {
+					return error(id, "cd", `cd: no such directory: ${target}`);
+				}
+				let isDir = false;
+				try {
+					isDir = fs.statSync(target).isDirectory();
+				} catch {
+					isDir = false;
+				}
+				if (!isDir) {
+					return error(id, "cd", `cd: not a directory: ${target}`);
+				}
+				session.setCwd(target);
+				await session.sendCustomMessage({
+					customType: "cwd-change",
+					content: `[Working directory changed to: ${target}]`,
+					display: false,
+				});
+				return success(id, "cd", { cwd: target, displayPath: shortPath(target), entries: listDir(target) });
 			}
 
 			// =================================================================
@@ -584,8 +806,16 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					customInstructions: command.customInstructions,
 					replaceInstructions: command.replaceInstructions,
 					label: command.label,
+					exact: command.exact,
 				});
 				return success(id, "navigate_tree", result);
+			}
+
+			case "get_session_tree": {
+				return success(id, "get_session_tree", {
+					tree: session.sessionManager.getTree(),
+					leafId: session.sessionManager.getLeafId(),
+				});
 			}
 
 			case "fork": {
@@ -607,6 +837,23 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "get_fork_messages": {
 				const messages = session.getUserMessagesForForking();
 				return success(id, "get_fork_messages", { messages });
+			}
+
+			case "get_file_checkpoint_status": {
+				return success(id, "get_file_checkpoint_status", session.getFileCheckpointStatus());
+			}
+
+			case "get_file_checkpoint_turn_status": {
+				return success(
+					id,
+					"get_file_checkpoint_turn_status",
+					session.getFileCheckpointTurnStatus(command.turnIndex),
+				);
+			}
+
+			case "restore_file_changes_to_turn": {
+				const result = await session.restoreFileChangesToTurn(command.turnIndex);
+				return success(id, "restore_file_changes_to_turn", result);
 			}
 
 			case "get_last_assistant_text": {
@@ -666,6 +913,15 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					});
 				}
 
+				for (const command of session.resourceLoader.getCommands().commands) {
+					commands.push({
+						name: command.name,
+						description: command.description,
+						source: "markdown",
+						sourceInfo: command.sourceInfo,
+					});
+				}
+
 				for (const skill of session.resourceLoader.getSkills().skills) {
 					commands.push({
 						name: `skill:${skill.name}`,
@@ -676,6 +932,16 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				}
 
 				return success(id, "get_commands", { commands });
+			}
+
+			// =================================================================
+			// Sub-agents
+			// =================================================================
+
+			case "get_subagent_tasks": {
+				const mgr = getGlobalSubagentManager();
+				const tasks = mgr ? [...mgr.tasks.values()] : [];
+				return success(id, "get_subagent_tasks", { tasks });
 			}
 
 			default: {

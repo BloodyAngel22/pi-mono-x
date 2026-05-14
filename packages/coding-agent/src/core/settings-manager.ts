@@ -52,6 +52,15 @@ export interface MarkdownSettings {
 	codeBlockIndent?: string; // default: "  "
 }
 
+export interface FastFetchSettings {
+	searchUrl?: string; // default: DuckDuckGo HTML endpoint
+	queryParam?: string; // default: "q"
+	headers?: Record<string, string>;
+	timeoutMs?: number; // default: 20000
+	maxBytes?: number; // default: 65536
+	maxResults?: number; // default: 5
+}
+
 export type ToolVerbosityLevel = "full" | "compact";
 
 export interface ToolVerbositySettings {
@@ -64,6 +73,7 @@ export interface ToolVerbositySettings {
 	write?: ToolVerbosityLevel; // default: "full"
 	edit?: ToolVerbosityLevel; // default: "full"
 	diff?: ToolVerbosityLevel; // default: "full"
+	fast_fetch?: ToolVerbosityLevel; // default: "compact"
 }
 
 export interface WarningSettings {
@@ -126,6 +136,7 @@ export interface Settings {
 	warnings?: WarningSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
 	toolVerbosity?: ToolVerbositySettings; // Per-tool output verbosity level
+	fastFetch?: FastFetchSettings; // Configuration for the fast_fetch web tool
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -1085,6 +1096,13 @@ export class SettingsManager {
 		return { ...(this.settings.warnings ?? {}) };
 	}
 
+	getFastFetchSettings(): FastFetchSettings {
+		return {
+			...(this.settings.fastFetch ?? {}),
+			headers: this.settings.fastFetch?.headers ? { ...this.settings.fastFetch.headers } : undefined,
+		};
+	}
+
 	setWarnings(warnings: WarningSettings): void {
 		this.globalSettings.warnings = { ...warnings };
 		this.markModified("warnings");
@@ -1104,7 +1122,7 @@ export class SettingsManager {
 		// Built-in destructive tools default to full; built-in read-only tools
 		// and all unknown (MCP) tools default to compact.
 		const fullByDefault = new Set(["bash", "write", "edit"]);
-		const knownBuiltins = new Set(["bash", "write", "edit", "read", "find", "grep", "ls"]);
+		const knownBuiltins = new Set(["bash", "write", "edit", "read", "find", "grep", "ls", "fast_fetch"]);
 		if (fullByDefault.has(toolName)) return "full";
 		if (knownBuiltins.has(toolName)) return "compact";
 		// Unknown tool → MCP → compact

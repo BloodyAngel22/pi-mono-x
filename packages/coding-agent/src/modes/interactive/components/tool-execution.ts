@@ -293,10 +293,15 @@ export class ToolExecutionComponent extends Container {
 			}
 
 			if (this.result) {
-				// In compact mode, hide result output unless expanded or it's an error
-				const showResult = this.verbosityLevel === "full" || this.expanded || this.result.isError;
+				const resultRenderer = this.getResultRenderer();
+				// In compact mode, hide generic result output unless expanded or it's an error.
+				// Custom renderers may intentionally render live partial progress, e.g. sub-agent task activity.
+				const showResult =
+					this.verbosityLevel === "full" ||
+					this.expanded ||
+					this.result.isError ||
+					(this.isPartial && !!resultRenderer);
 				if (showResult) {
-					const resultRenderer = this.getResultRenderer();
 					if (!resultRenderer) {
 						const component = this.createResultFallback();
 						if (component) {

@@ -180,6 +180,7 @@ export {
 	// Tool factories (for custom cwd)
 	createCodingTools,
 	createEditTool,
+	createFastFetchTool,
 	createFindTool,
 	createGrepTool,
 	createLsTool,
@@ -231,6 +232,7 @@ export {
 export { createSyntheticSourceInfo } from "./core/source-info.js";
 // Subagent system
 export {
+	getGlobalSubagentManager,
 	loadAgents,
 	type SubagentConfig,
 	type SubagentEvent,
@@ -241,6 +243,7 @@ export {
 	type SubagentSessionFactory,
 	type SubagentTask,
 	type SubagentTaskStatus,
+	setGlobalSubagentManager,
 } from "./core/subagent/index.js";
 // Tools
 export {
@@ -252,6 +255,7 @@ export {
 	type BashToolOptions,
 	createBashToolDefinition,
 	createEditToolDefinition,
+	createFastFetchToolDefinition,
 	createFindToolDefinition,
 	createGrepToolDefinition,
 	createLocalBashOperations,
@@ -264,6 +268,9 @@ export {
 	type EditToolDetails,
 	type EditToolInput,
 	type EditToolOptions,
+	type FastFetchToolDetails,
+	type FastFetchToolInput,
+	type FastFetchToolOptions,
 	type FindOperations,
 	type FindToolDetails,
 	type FindToolInput,

@@ -1,6 +1,6 @@
 export { loadAgents } from "./agents.js";
 export type { SubagentSessionFactory } from "./manager.js";
-export { SubagentManager } from "./manager.js";
+export { getGlobalSubagentManager, SubagentManager, setGlobalSubagentManager } from "./manager.js";
 export type {
 	SubagentConfig,
 	SubagentEvent,

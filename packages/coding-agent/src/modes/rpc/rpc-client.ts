@@ -10,6 +10,9 @@ import type { ImageContent } from "@mariozechner/pi-ai";
 import type { SessionStats } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
+import type { FastContextResult } from "../../core/context-search.js";
+import type { SubagentTask } from "../../core/subagent/types.js";
+import type { FastFetchToolDetails } from "../../core/tools/index.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
 import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.js";
 
@@ -317,6 +320,25 @@ export class RpcClient {
 	}
 
 	/**
+	 * Search current codebase for relevant files/ranges.
+	 */
+	async fastContext(query: string): Promise<FastContextResult> {
+		const response = await this.send({ type: "fast_context", query });
+		return this.getData(response);
+	}
+
+	/**
+	 * Fast web search or direct URL fetch without MCP.
+	 */
+	async fastFetch(
+		query: string,
+		options?: { mode?: "search" | "url"; maxResults?: number; timeoutMs?: number },
+	): Promise<{ text: string; details: FastFetchToolDetails | undefined }> {
+		const response = await this.send({ type: "fast_fetch", query, ...options });
+		return this.getData(response);
+	}
+
+	/**
 	 * Export session to HTML.
 	 */
 	async exportHtml(outputPath?: string): Promise<{ path: string }> {
@@ -388,6 +410,14 @@ export class RpcClient {
 	async getCommands(): Promise<RpcSlashCommand[]> {
 		const response = await this.send({ type: "get_commands" });
 		return this.getData<{ commands: RpcSlashCommand[] }>(response).commands;
+	}
+
+	/**
+	 * Get current sub-agent tasks with recent activities.
+	 */
+	async getSubagentTasks(): Promise<SubagentTask[]> {
+		const response = await this.send({ type: "get_subagent_tasks" });
+		return this.getData<{ tasks: SubagentTask[] }>(response).tasks;
 	}
 
 	// =========================================================================

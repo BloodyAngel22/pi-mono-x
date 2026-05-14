@@ -4,11 +4,14 @@ import type {
 	SubagentSessionFactory,
 	ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
+import { Container, Text } from "@mariozechner/pi-tui";
 import {
 	createAgentSession,
 	createExtensionRuntime,
+	getGlobalSubagentManager,
 	loadAgents,
 	SessionManager,
+	setGlobalSubagentManager,
 	SubagentManager,
 } from "@mariozechner/pi-coding-agent";
 import { homedir } from "node:os";
@@ -22,6 +25,10 @@ const HEAVY_PATTERNS: RegExp[] = [
 	/\b(search|look up|find|research)\b.{0,20}\b(documentation|docs|guide|tutorial|solution|fix)\b/i,
 	/\b(latest|current|recent|updated)\b.{0,20}\b(docs|documentation|api|version|release)\b/i,
 ];
+
+type TaskToolDetails = {
+	activities?: string[];
+};
 
 function buildGuidance(agents: SubagentConfig[]): string {
 	let guidance = `
@@ -100,6 +107,7 @@ export default function (pi: ExtensionAPI): void {
 
 			return {
 				prompt: (text: string) => session.prompt(text),
+				abort: () => session.agent.abort(),
 				getMessages: () =>
 					session.state.messages.map((m: any) => ({
 						role: m.role as string,
@@ -110,10 +118,13 @@ export default function (pi: ExtensionAPI): void {
 					})),
 				subscribe: (listener: (event: { type: string; text?: string }) => void) =>
 					session.subscribe((event: any) => listener(event)),
+				subscribeAgentEvents: (listener: (event: { type: string; toolName?: string; args?: Record<string, unknown> }) => void) =>
+					session.agent.subscribe((event: any) => listener(event)),
 			};
 		};
 
 		manager = new SubagentManager(sessionFactory);
+		setGlobalSubagentManager(manager);
 
 		// Live-update ticker: refreshes elapsed times every second while tasks are running
 		let liveTickTimer: NodeJS.Timeout | null = null;
@@ -127,9 +138,31 @@ export default function (pi: ExtensionAPI): void {
 					const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m${elapsed % 60}s`;
 					const dot =
 						t.status === "done" ? "\u25cf done" : t.status === "error" ? "\u25cf err" : "\u25cf";
-					return `${dot} ${t.label} (${elapsedStr})`;
+					const lastActivity = t.recentActivities?.length ? ` (${t.recentActivities[t.recentActivities.length - 1]})` : "";
+					return `${dot} ${t.label}${lastActivity} (${elapsedStr})`;
 				})
 				.join("  ");
+		};
+
+		const formatSubagentWidget = (): string[] => {
+			const tasks = manager?.getRecentTasks(30_000) ?? [];
+			if (tasks.length === 0) return [];
+			const lines: string[] = [];
+			for (const task of tasks) {
+				const elapsed = Math.floor(((task.completedAt ?? Date.now()) - task.startedAt) / 1000);
+				const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+				const dot =
+					task.status === "running" || task.status === "background" ? "●" :
+					task.status === "error" ? "●" : "●";
+				const label = task.label || task.agentName || "sub-agent";
+				lines.push(`${dot} ${label} (${elapsedStr})`);
+				if (task.recentActivities?.length) {
+					for (const activity of task.recentActivities) {
+						lines.push(`  ⤷ ${activity}`);
+					}
+				}
+			}
+			return lines;
 		};
 
 		const startLiveTick = (ui: any) => {
@@ -153,26 +186,38 @@ export default function (pi: ExtensionAPI): void {
 			switch (event.type) {
 				case "task_start":
 					ui.setStatus("subagent", formatSubagentStatus());
+					ui.setWidget("subagent-status", formatSubagentWidget(), { placement: "aboveEditor" });
 					startLiveTick(ui);
+					break;
+				case "task_progress":
+					ui.setStatus("subagent", formatSubagentStatus());
+					ui.setWidget("subagent-status", formatSubagentWidget(), { placement: "aboveEditor" });
 					break;
 				case "task_complete": {
 					ui.setStatus("subagent", formatSubagentStatus());
+					ui.setWidget("subagent-status", formatSubagentWidget(), { placement: "aboveEditor" });
 					setTimeout(() => {
 						const active = manager?.getActiveTasks() ?? [];
 						if (active.length === 0) {
 							ui.setStatus("subagent", "");
+							ui.setWidget("subagent-status", undefined);
 						} else {
 							ui.setStatus("subagent", formatSubagentStatus());
+							ui.setWidget("subagent-status", formatSubagentWidget(), { placement: "aboveEditor" });
 						}
 					}, 5000);
 					break;
 				}
 				case "task_error":
 					ui.setStatus("subagent", formatSubagentStatus());
+					ui.setWidget("subagent-status", formatSubagentWidget(), { placement: "aboveEditor" });
 					ui.notify(`Sub-agent error: ${event.error}`, "error");
 					setTimeout(() => {
 						const active = manager?.getActiveTasks() ?? [];
-						if (active.length === 0) ui.setStatus("subagent", "");
+						if (active.length === 0) {
+							ui.setStatus("subagent", "");
+							ui.setWidget("subagent-status", undefined);
+						}
 					}, 5000);
 					break;
 			}
@@ -216,7 +261,14 @@ export default function (pi: ExtensionAPI): void {
 			required: ["description", "instructions"],
 		} as any,
 		executionMode: "parallel",
-		execute: async (_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) => {
+		renderResult: (result: { details?: TaskToolDetails }, _options: unknown, thm: any) => {
+			const container = new Container();
+			for (const activity of result.details?.activities ?? []) {
+				container.addChild(new Text(thm.fg("dim", `  └─ ${activity}`), 0, 0));
+			}
+			return container;
+		},
+		execute: async (_toolCallId: string, params: any, signal: AbortSignal | undefined, onUpdate: any, ctx: any) => {
 			const mgr = getManager();
 			const cwd: string = ctx?.cwd ?? process.cwd();
 
@@ -231,6 +283,7 @@ export default function (pi: ExtensionAPI): void {
 			}
 
 			try {
+				const activities: string[] = [];
 				const result = await mgr.run({
 					instructions: params.instructions,
 					label: params.description ?? "task",
@@ -238,6 +291,15 @@ export default function (pi: ExtensionAPI): void {
 					agent: agentConfig,
 					parentMcpTools: mcpToolDefs.length > 0 ? mcpToolDefs : undefined,
 					model: ctx?.model,
+					signal,
+						onProgress: (activity: string) => {
+						activities.push(activity);
+						const recent = activities.slice(-5);
+						onUpdate?.({
+							content: [{ type: "text" as const, text: "" }],
+							details: { activities: recent } satisfies TaskToolDetails,
+						});
+					},
 				});
 
 				return {
@@ -248,6 +310,7 @@ export default function (pi: ExtensionAPI): void {
 						inputTokens: result.inputTokens,
 						outputTokens: result.outputTokens,
 						savedTokens: result.savedTokens,
+						activities: activities.slice(-5),
 					},
 				};
 			} catch (err: unknown) {
@@ -262,6 +325,10 @@ export default function (pi: ExtensionAPI): void {
 	// Load agents and inject guidance on session start
 	pi.on("session_start", async (_event: any, ctx: any) => {
 		currentCtx = ctx;
+
+		// Store manager reference on session for RPC access
+		const mgr = getManager();
+		(ctx as any).__subagentManager = mgr;
 
 		const agentDir = join(homedir(), ".pi", "agent");
 		const cwd: string = ctx?.cwd ?? process.cwd();

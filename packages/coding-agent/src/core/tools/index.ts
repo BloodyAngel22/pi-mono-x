@@ -17,6 +17,19 @@ export {
 	type EditToolInput,
 	type EditToolOptions,
 } from "./edit.js";
+export {
+	createFastContextTool,
+	createFastContextToolDefinition,
+	type FastContextToolDetails,
+	type FastContextToolInput,
+} from "./fast-context.js";
+export {
+	createFastFetchTool,
+	createFastFetchToolDefinition,
+	type FastFetchToolDetails,
+	type FastFetchToolInput,
+	type FastFetchToolOptions,
+} from "./fast-fetch.js";
 export { withFileMutationQueue } from "./file-mutation-queue.js";
 export {
 	createFindTool,
@@ -72,6 +85,8 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.js";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.js";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.js";
+import { createFastContextTool, createFastContextToolDefinition } from "./fast-context.js";
+import { createFastFetchTool, createFastFetchToolDefinition, type FastFetchToolOptions } from "./fast-fetch.js";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.js";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.js";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.js";
@@ -80,8 +95,18 @@ import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } fro
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
-export const allToolNames: Set<ToolName> = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+export type ToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls" | "fast_context" | "fast_fetch";
+export const allToolNames: Set<ToolName> = new Set([
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"grep",
+	"find",
+	"ls",
+	"fast_context",
+	"fast_fetch",
+]);
 
 export interface ToolsOptions {
 	read?: ReadToolOptions;
@@ -91,6 +116,7 @@ export interface ToolsOptions {
 	grep?: GrepToolOptions;
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
+	fastFetch?: FastFetchToolOptions;
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -109,6 +135,10 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createFindToolDefinition(cwd, options?.find);
 		case "ls":
 			return createLsToolDefinition(cwd, options?.ls);
+		case "fast_context":
+			return createFastContextToolDefinition(cwd);
+		case "fast_fetch":
+			return createFastFetchToolDefinition(cwd, options?.fastFetch);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -130,6 +160,10 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createFindTool(cwd, options?.find);
 		case "ls":
 			return createLsTool(cwd, options?.ls);
+		case "fast_context":
+			return createFastContextTool(cwd);
+		case "fast_fetch":
+			return createFastFetchTool(cwd, options?.fastFetch);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -150,6 +184,8 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 		createGrepToolDefinition(cwd, options?.grep),
 		createFindToolDefinition(cwd, options?.find),
 		createLsToolDefinition(cwd, options?.ls),
+		createFastContextToolDefinition(cwd),
+		createFastFetchToolDefinition(cwd, options?.fastFetch),
 	];
 }
 
@@ -162,6 +198,8 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		grep: createGrepToolDefinition(cwd, options?.grep),
 		find: createFindToolDefinition(cwd, options?.find),
 		ls: createLsToolDefinition(cwd, options?.ls),
+		fast_context: createFastContextToolDefinition(cwd),
+		fast_fetch: createFastFetchToolDefinition(cwd, options?.fastFetch),
 	};
 }
 
@@ -180,6 +218,8 @@ export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[]
 		createGrepTool(cwd, options?.grep),
 		createFindTool(cwd, options?.find),
 		createLsTool(cwd, options?.ls),
+		createFastContextTool(cwd),
+		createFastFetchTool(cwd, options?.fastFetch),
 	];
 }
 
@@ -192,5 +232,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		grep: createGrepTool(cwd, options?.grep),
 		find: createFindTool(cwd, options?.find),
 		ls: createLsTool(cwd, options?.ls),
+		fast_context: createFastContextTool(cwd),
+		fast_fetch: createFastFetchTool(cwd, options?.fastFetch),
 	};
 }
