@@ -140,9 +140,9 @@ export function createFastFetchToolDefinition(
 			"Fast internet fetch/search without MCP. Uses the configured fastFetch.searchUrl endpoint from settings.json, or DuckDuckGo HTML search by default, and returns compact text.",
 		promptSnippet: "Fast web search or URL fetch without MCP",
 		promptGuidelines: [
-			"Use fast_fetch for quick web lookups when MCP search/docs tools are unavailable or too slow.",
-			"Use mode=url for a known URL; otherwise pass a concise search query.",
-			"Prefer one fast_fetch call before slower multi-step web research.",
+			"MUST use fast_fetch for web lookups instead of delegating to sub-agent — it is faster and cheaper.",
+			"Only delegate to sub-agent if fast_fetch is unavailable or the task requires deep multi-page research.",
+			"Use mode=url for known URLs; otherwise pass a concise search query. Prefer 1 fast_fetch over multiple MCP calls.",
 		],
 		parameters: fastFetchSchema,
 		executionMode: "parallel",

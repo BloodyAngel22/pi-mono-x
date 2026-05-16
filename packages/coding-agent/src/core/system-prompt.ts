@@ -122,6 +122,23 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		}
 	}
 
+	// Time/budget consciousness — must be high priority
+	addGuideline(
+		"You have limited time and token budget. Prioritize high-signal actions: make targeted changes, not extensive research.",
+	);
+	addGuideline(
+		"If a task is unclear, ASK the user instead of spending minutes researching — their clarification costs less than your research.",
+	);
+	addGuideline(
+		"After 3+ failed attempts at a task, stop and ask the user for guidance instead of continuing to try different approaches.",
+	);
+
+	// Context compression — prevent token bloat
+	addGuideline(
+		"After 10+ tool calls in a session, consider using compress tool to summarize context and free up tokens.",
+	);
+	addGuideline("Avoid returning verbose traces or full file contents — return only the relevant findings or changes.");
+
 	// Always include these — order matters, higher = higher priority
 	addGuideline(
 		"When you want to ask the user a question: ALWAYS use the ask_user tool — never write a numbered/bulleted list of questions in plain text. " +

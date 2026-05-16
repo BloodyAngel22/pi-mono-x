@@ -44,9 +44,10 @@ export function createFastContextToolDefinition(
 			"Quickly find relevant files, line ranges, and compact snippets in the current codebase before deeper reading. Uses grounded local lexical search (ripgrep/fd), query expansion, and source-file ranking. Use this before broad grep/find/read exploration.",
 		promptSnippet: "Fast codebase context search for relevant files/ranges",
 		promptGuidelines: [
-			"When a task requires finding where code lives in a project and the exact file is not already known, call fast_context before broad ls/find/grep/read exploration.",
-			"After fast_context, read only the top relevant returned files/ranges needed for the task; do not read many unrelated files first.",
-			"If fast_context returns weak or no results, then fall back to grep/find/read with refined terms.",
+			"MUST call fast_context before broad grep/find/read when finding code in a codebase — it is fast and designed exactly for this.",
+			"Reading 3+ files without fast_context first is slow and wasteful — you are ignoring the optimized tool.",
+			"After fast_context, read ONLY the top relevant returned files/ranges. Do NOT read many unrelated files.",
+			"If fast_context returns weak or no results, THEN fall back to grep/find/read with refined terms.",
 		],
 		parameters: fastContextSchema,
 		executionMode: "parallel",

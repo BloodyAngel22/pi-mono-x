@@ -32,11 +32,27 @@ type TaskToolDetails = {
 
 function buildGuidance(agents: SubagentConfig[]): string {
 	let guidance = `
+## Staged Research Protocol
+
+**Stage 1 — fast_context / fast_fetch (30 seconds max):**
+Use these tools FIRST for any code search or web lookup. They are optimized for speed.
+
+**Stage 2 — Sub-agent delegation (only if Stage 1 failed):**
+Delegate to \`task\` only when fast_context/fast_fetch did not yield enough information.
+
+**Stage 3 — Direct file reading (only when absolutely necessary):**
+Only read files directly if you know the exact path and the content is critical.
+
 ## Sub-agent delegation
 
 You have a \`task\` tool that runs work in an isolated sub-agent with a fresh context window.
 The sub-agent has access to all built-in tools and MCP tools (web search, documentation lookup, code analysis).
 Only the final result is returned to your context, saving significant tokens.
+
+**Hard limits:**
+- NEVER spend >5 minutes on any single research task without asking user for guidance.
+- If initial approach fails after 2 attempts, ask user instead of continuing research.
+- Sub-agent results should be distilled summaries — instruct them to stop early when they have enough.
 
 **Always delegate via \`task\`:**
 - Exploring or scanning a codebase (reading 3+ files to gather information)
@@ -52,10 +68,11 @@ Only the final result is returned to your context, saving significant tokens.
 - Simple commands (git status, npm test)
 
 **Critical rules:**
+- MUST use fast_context before delegating to sub-agent for code exploration.
 - NEVER read a whole codebase directly -- delegate via \`task\`
 - NEVER narrate your process to the user ("I will now use a sub-agent...", "The sub-agent returned..."). Just present the result as your own answer.
 - After \`task\` returns, answer the user directly and concisely. Do not explain what the sub-agent did.
-- For web research, always delegate to \`task\` so page contents don't fill the main context.
+- For web research, prefer fast_fetch before delegating to sub-agent — fast_fetch is faster and cheaper.
 - For independent sub-tasks, call multiple \`task\` tools -- they run in parallel.`.trim();
 
 	if (agents.length > 0) {
@@ -284,8 +301,12 @@ export default function (pi: ExtensionAPI): void {
 
 			try {
 				const activities: string[] = [];
+				// Add result size limit to sub-agent instructions to reduce token waste
+				const limitedInstructions =
+					params.instructions +
+					"\n\nIMPORTANT: Return a distilled summary (max 500 tokens). Stop early if you have enough to answer the original question. Do NOT return verbose traces or full file contents.";
 				const result = await mgr.run({
-					instructions: params.instructions,
+					instructions: limitedInstructions,
 					label: params.description ?? "task",
 					cwd,
 					agent: agentConfig,
