@@ -37,6 +37,7 @@ import {
 	collectEntriesForBranchSummary,
 	compact,
 	estimateContextTokens,
+	estimateMessageTokens,
 	generateBranchSummary,
 	prepareCompaction,
 	shouldCompact,
@@ -1942,6 +1943,7 @@ export class AgentSession {
 			let summary: string;
 			let firstKeptEntryId: string;
 			let tokensBefore: number;
+			let tokensAfter: number | undefined;
 			let details: unknown;
 
 			if (extensionCompaction) {
@@ -1949,6 +1951,7 @@ export class AgentSession {
 				summary = extensionCompaction.summary;
 				firstKeptEntryId = extensionCompaction.firstKeptEntryId;
 				tokensBefore = extensionCompaction.tokensBefore;
+				tokensAfter = extensionCompaction.tokensAfter;
 				details = extensionCompaction.details;
 			} else {
 				// Generate compaction result
@@ -1964,6 +1967,7 @@ export class AgentSession {
 				summary = result.summary;
 				firstKeptEntryId = result.firstKeptEntryId;
 				tokensBefore = result.tokensBefore;
+				tokensAfter = result.tokensAfter;
 				details = result.details;
 			}
 
@@ -1975,11 +1979,15 @@ export class AgentSession {
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
+			tokensAfter ??= estimateMessageTokens(sessionContext.messages);
 
 			// Get the saved compaction entry for the extension event
 			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
 				| CompactionEntry
 				| undefined;
+			if (savedCompactionEntry) {
+				savedCompactionEntry.tokensAfter = tokensAfter;
+			}
 
 			if (this._extensionRunner && savedCompactionEntry) {
 				await this._extensionRunner.emit({
@@ -1993,6 +2001,7 @@ export class AgentSession {
 				summary,
 				firstKeptEntryId,
 				tokensBefore,
+				tokensAfter,
 				details,
 			};
 			this._emit({
@@ -2207,6 +2216,7 @@ export class AgentSession {
 			let summary: string;
 			let firstKeptEntryId: string;
 			let tokensBefore: number;
+			let tokensAfter: number | undefined;
 			let details: unknown;
 
 			if (extensionCompaction) {
@@ -2214,6 +2224,7 @@ export class AgentSession {
 				summary = extensionCompaction.summary;
 				firstKeptEntryId = extensionCompaction.firstKeptEntryId;
 				tokensBefore = extensionCompaction.tokensBefore;
+				tokensAfter = extensionCompaction.tokensAfter;
 				details = extensionCompaction.details;
 			} else {
 				// Generate compaction result
@@ -2229,6 +2240,7 @@ export class AgentSession {
 				summary = compactResult.summary;
 				firstKeptEntryId = compactResult.firstKeptEntryId;
 				tokensBefore = compactResult.tokensBefore;
+				tokensAfter = compactResult.tokensAfter;
 				details = compactResult.details;
 			}
 
@@ -2247,11 +2259,15 @@ export class AgentSession {
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
+			tokensAfter ??= estimateMessageTokens(sessionContext.messages);
 
 			// Get the saved compaction entry for the extension event
 			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
 				| CompactionEntry
 				| undefined;
+			if (savedCompactionEntry) {
+				savedCompactionEntry.tokensAfter = tokensAfter;
+			}
 
 			if (this._extensionRunner && savedCompactionEntry) {
 				await this._extensionRunner.emit({
@@ -2265,6 +2281,7 @@ export class AgentSession {
 				summary,
 				firstKeptEntryId,
 				tokensBefore,
+				tokensAfter,
 				details,
 			};
 			this._emit({ type: "compaction_end", reason, result, aborted: false, willRetry });
@@ -3258,6 +3275,14 @@ export class AgentSession {
 		const latestCompaction = getLatestCompactionEntry(branchEntries);
 
 		if (latestCompaction) {
+			// Immediately after compaction there may be no post-compaction assistant usage yet.
+			// In that case use the persisted content-only estimate computed during compaction
+			// so UIs can update their context indicator right away.
+			if (typeof latestCompaction.tokensAfter === "number") {
+				const percent = (latestCompaction.tokensAfter / contextWindow) * 100;
+				return { tokens: latestCompaction.tokensAfter, contextWindow, percent };
+			}
+
 			// Check if there's a valid assistant usage after the compaction boundary
 			const compactionIndex = branchEntries.lastIndexOf(latestCompaction);
 			let hasPostCompactionUsage = false;

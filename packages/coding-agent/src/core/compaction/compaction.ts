@@ -104,6 +104,8 @@ export interface CompactionResult<T = unknown> {
 	summary: string;
 	firstKeptEntryId: string;
 	tokensBefore: number;
+	/** Estimated context tokens after compaction (summary + kept recent messages). */
+	tokensAfter?: number;
 	/** Extension-specific data (e.g., ArtifactIndex, version markers for structured compaction) */
 	details?: T;
 }
@@ -187,10 +189,7 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
 	const usageInfo = getLastAssistantUsageInfo(messages);
 
 	if (!usageInfo) {
-		let estimated = 0;
-		for (const message of messages) {
-			estimated += estimateTokens(message);
-		}
+		const estimated = estimateMessageTokens(messages);
 		return {
 			tokens: estimated,
 			usageTokens: 0,
@@ -211,6 +210,19 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
 		trailingTokens,
 		lastUsageIndex: usageInfo.index,
 	};
+}
+
+/**
+ * Estimate tokens from message content only, ignoring provider usage metadata.
+ * Useful after compaction: retained assistant messages may still carry old
+ * pre-compaction usage totals, which would otherwise make before/after equal.
+ */
+export function estimateMessageTokens(messages: AgentMessage[]): number {
+	let estimated = 0;
+	for (const message of messages) {
+		estimated += estimateTokens(message);
+	}
+	return estimated;
 }
 
 /**
