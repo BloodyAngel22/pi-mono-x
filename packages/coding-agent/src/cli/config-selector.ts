@@ -2,7 +2,7 @@
  * TUI config selector for `pi config` command
  */
 
-import { ProcessTerminal, TUI } from "@mariozechner/pi-tui";
+import { ProcessTerminal, TUI } from "@earendil-works/pi-tui";
 import type { ResolvedPaths } from "../core/package-manager.js";
 import type { SettingsManager } from "../core/settings-manager.js";
 import { ConfigSelectorComponent } from "../modes/interactive/components/config-selector.js";
@@ -43,6 +43,7 @@ export async function selectConfig(options: ConfigSelectorOptions): Promise<void
 				process.exit(0);
 			},
 			() => ui.requestRender(),
+			ui.terminal.rows,
 		);
 
 		ui.addChild(selector);

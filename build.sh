@@ -45,11 +45,11 @@ echo "────────────────────────�
 
 # Core packages — strict dependency order
 build_pkg tui
-#build_pkg ai
+build_pkg ai
 build_pkg agent
 build_pkg coding-agent
-build_pkg mom
-build_pkg pods
+#build_pkg mom
+#build_pkg pods
 
 if [ "$SKIP_WEB_UI" = false ]; then
   build_pkg web-ui

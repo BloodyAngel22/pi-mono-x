@@ -3,8 +3,8 @@ import type {
 	SubagentConfig,
 	SubagentSessionFactory,
 	ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
-import { Container, Text } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { Container, Text } from "@earendil-works/pi-tui";
 import {
 	createAgentSession,
 	createExtensionRuntime,
@@ -13,7 +13,7 @@ import {
 	SessionManager,
 	setGlobalSubagentManager,
 	SubagentManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { join } from "node:path";
 

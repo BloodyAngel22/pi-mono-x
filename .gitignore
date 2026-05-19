@@ -17,6 +17,7 @@ packages/*/dist-firefox/
 .zed/
 .idea/
 .serena/
+.claude/
 *.swp
 *.swo
 *~

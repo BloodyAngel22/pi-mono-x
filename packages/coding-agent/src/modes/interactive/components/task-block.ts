@@ -1,4 +1,4 @@
-import { Container, type TUI, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { Container, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
 import { theme } from "../theme/theme.js";
 import type { ToolExecutionComponent } from "./tool-execution.js";

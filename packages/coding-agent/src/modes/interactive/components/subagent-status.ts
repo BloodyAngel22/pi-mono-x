@@ -1,4 +1,4 @@
-import { type Component, type TUI, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { type Component, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { SubagentManager } from "../../../core/subagent/manager.js";
 import type { SubagentTask } from "../../../core/subagent/types.js";
 import { theme } from "../theme/theme.js";

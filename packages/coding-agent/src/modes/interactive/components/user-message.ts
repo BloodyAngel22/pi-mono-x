@@ -1,5 +1,5 @@
-import type { Component, MarkdownTheme } from "@mariozechner/pi-tui";
-import { Markdown, visibleWidth } from "@mariozechner/pi-tui";
+import type { Component, MarkdownTheme } from "@earendil-works/pi-tui";
+import { Markdown, visibleWidth } from "@earendil-works/pi-tui";
 import { getMarkdownTheme, theme } from "../theme/theme.js";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";

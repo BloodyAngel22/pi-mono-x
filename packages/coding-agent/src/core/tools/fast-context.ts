@@ -1,5 +1,5 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { Text } from "@mariozechner/pi-tui";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { Text } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
 import { type FastContextResult, fastContextSearch, formatFastContextResult } from "../context-search.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
