@@ -3260,15 +3260,9 @@ export class AgentSession {
 		const latestCompaction = getLatestCompactionEntry(branchEntries);
 
 		if (latestCompaction) {
-			// Immediately after compaction there may be no post-compaction assistant usage yet.
-			// In that case use the persisted content-only estimate computed during compaction
-			// so UIs can update their context indicator right away.
-			if (typeof latestCompaction.tokensAfter === "number") {
-				const percent = (latestCompaction.tokensAfter / contextWindow) * 100;
-				return { tokens: latestCompaction.tokensAfter, contextWindow, percent };
-			}
-
-			// Check if there's a valid assistant usage after the compaction boundary
+			// Check if there's a valid assistant usage after the compaction boundary.
+			// Once it exists, it is fresher than tokensAfter and must drive the live
+			// context indicator. tokensAfter is only the immediate post-compact estimate.
 			const compactionIndex = branchEntries.lastIndexOf(latestCompaction);
 			let hasPostCompactionUsage = false;
 			for (let i = branchEntries.length - 1; i > compactionIndex; i--) {
@@ -3286,6 +3280,10 @@ export class AgentSession {
 			}
 
 			if (!hasPostCompactionUsage) {
+				if (typeof latestCompaction.tokensAfter === "number") {
+					const percent = (latestCompaction.tokensAfter / contextWindow) * 100;
+					return { tokens: latestCompaction.tokensAfter, contextWindow, percent };
+				}
 				return { tokens: null, contextWindow, percent: null };
 			}
 		}
