@@ -80,8 +80,8 @@ Add to `settings.json` (Ctrl+Shift+, or Settings → Open JSON file) to forward 
 }
 ```
 
-- `Shift+Enter` inserts a new line.
-- Windows Terminal binds `Alt+Enter` to fullscreen by default. That prevents pi from receiving `Alt+Enter` for follow-up queueing.
+- `Shift+Enter` and `Alt+Enter` insert a new line.
+- Windows Terminal binds `Alt+Enter` to fullscreen by default. That prevents pi from receiving `Alt+Enter` for multi-line input.
 - Remapping `Alt+Enter` to `sendInput` forwards the real key chord to pi instead.
 
 If you already have an `actions` array, add the objects to it. If the old fullscreen behavior persists, fully close and reopen Windows Terminal.

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Added Alt+Enter as a default newline shortcut alongside Shift+Enter for terminals that do not distinguish Shift+Enter from Enter.
+- Fixed Vim insert mode to insert a newline on Shift+Enter instead of submitting the prompt.
+
 ## [0.75.3] - 2026-05-18
 
 ## [0.75.2] - 2026-05-18

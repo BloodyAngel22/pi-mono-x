@@ -109,7 +109,7 @@ export const KEYBINDINGS = {
 		description: "Search prompt history",
 	},
 	"app.message.followUp": {
-		defaultKeys: "alt+enter",
+		defaultKeys: [],
 		description: "Queue follow-up message",
 	},
 	"app.message.dequeue": {

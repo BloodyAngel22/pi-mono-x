@@ -894,6 +894,7 @@ export class Editor implements Component, Focusable {
 
 	private handleVimInput(data: string): boolean {
 		if (!this.vimModeEnabled) return false;
+		if (this.vimInputMode === "insert" && getKeybindings().matches(data, "tui.input.newLine")) return false;
 		if (matchesKey(data, "escape")) {
 			this.vimPendingKey = null;
 			this.vimVisualAnchor = null;

@@ -14,6 +14,9 @@
 
 ### Fixed
 
+- Changed the default follow-up shortcut to unassigned and made Alt+Enter insert a newline by default, so terminals that send Shift+Enter as plain Enter still have a multi-line shortcut.
+- Fixed Shift+Enter to insert a newline before app-level keybindings such as follow-up submission handle it, including in Vim insert mode.
+- Fixed bash permission wildcard rules such as `rg *` to match invocations with flags before or after positional arguments, and generalized local, global, and session permission approvals to reusable bash rules instead of exact one-off commands.
 - Fixed MCP startup to stop blocking indefinitely: server initialization now has a 5 second soft timeout, continues in the background, and retries unavailable servers with backoff.
 - Fixed `write` and `edit` tool rendering to show a distinct file-operation block with path, status, and change statistics.
 - Fixed session tree navigation so the selected active branch persists across `/resume`, session switches, and pi restarts.

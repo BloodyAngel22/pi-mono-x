@@ -308,6 +308,25 @@ describe("Editor component", () => {
 		});
 	});
 
+	describe("Vim mode", () => {
+		it("inserts a newline on Shift+Enter in insert mode", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let submitted = false;
+			editor.onSubmit = () => {
+				submitted = true;
+			};
+
+			editor.setVimModeEnabled(true);
+			editor.handleInput("a");
+			editor.handleInput("\x1b[13;2u");
+			editor.handleInput("b");
+
+			assert.strictEqual(editor.getText(), "a\nb");
+			assert.strictEqual(submitted, false);
+			assert.strictEqual(editor.getVimInputMode(), "insert");
+		});
+	});
+
 	describe("Backslash+Enter newline workaround", () => {
 		it("inserts backslash immediately (no buffering)", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);

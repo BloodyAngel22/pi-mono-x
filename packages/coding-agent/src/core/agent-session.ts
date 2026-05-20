@@ -84,7 +84,7 @@ import { type HookEventName, runHooks } from "./hooks.js";
 import { type MarkdownCommand, matchMarkdownCommand } from "./markdown-commands.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
-import { type PermissionAskCallback, PermissionsManager } from "./permissions.js";
+import { generalizeBashPermissionMatch, type PermissionAskCallback, PermissionsManager } from "./permissions.js";
 import { PlanMode } from "./plan-mode.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
@@ -569,7 +569,7 @@ export class AgentSession {
 		if (!result) return undefined; // dismissed — allow
 
 		const { decision, scope } = result;
-		const match = result.match ?? value;
+		const match = result.match ?? (type === "bash" ? generalizeBashPermissionMatch(value) : value);
 
 		if (decision === "allow-always") {
 			pm.addRule({ type, match, policy: "allow" }, scope ?? "local");

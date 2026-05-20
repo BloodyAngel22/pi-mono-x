@@ -202,18 +202,120 @@ function matchesGlob(pattern: string, value: string): boolean {
 	}
 }
 
+function getLeadingCommand(value: string): string | null {
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+	const firstToken = trimmed.split(/\s+/)[0];
+	if (!firstToken) return null;
+	const command = firstToken.split("/").pop();
+	return command && command.length > 0 ? command : null;
+}
+
+function matchesBashPattern(pattern: string, value: string): boolean {
+	const commandPrefixMatch = pattern.trim().match(/^([^\s*?]+)\s+\*$/);
+	if (!commandPrefixMatch) return matchesGlob(pattern, value);
+
+	const patternCommand = commandPrefixMatch[1]?.split("/").pop();
+	const valueCommand = getLeadingCommand(value);
+	return !!patternCommand && valueCommand === patternCommand;
+}
+
+const GENERALIZED_BASH_COMMANDS = new Set([
+	"awk",
+	"bat",
+	"cat",
+	"cut",
+	"df",
+	"diff",
+	"du",
+	"echo",
+	"env",
+	"fd",
+	"file",
+	"find",
+	"grep",
+	"head",
+	"less",
+	"ls",
+	"printenv",
+	"pwd",
+	"rg",
+	"sed",
+	"sort",
+	"stat",
+	"tail",
+	"tr",
+	"tree",
+	"type",
+	"uniq",
+	"wc",
+	"which",
+]);
+
+export function generalizeBashPermissionMatch(command: string): string {
+	const subCommands = splitCompoundCommand(command);
+	if (subCommands.length !== 1) return command;
+
+	const leadingCommand = getLeadingCommand(command);
+	if (!leadingCommand || !GENERALIZED_BASH_COMMANDS.has(leadingCommand)) return command;
+	return `${leadingCommand} *`;
+}
+
 // ============================================================================
 // Compound-command splitting
 // ============================================================================
 
 /**
  * Split a bash command string into individual sub-commands by shell operators.
- * Handles &&, ||, ;, and |. Does not attempt full shell parsing (no quotes etc.)
- * Returns trimmed, non-empty sub-command strings.
+ * Handles &&, ||, ;, and | outside quotes. Returns trimmed, non-empty sub-command strings.
  */
 function splitCompoundCommand(cmd: string): string[] {
-	// Split on &&, ||, ;, | (in that priority order via regex alternation)
-	const parts = cmd.split(/&&|\|\||;|\|/);
+	const parts: string[] = [];
+	let current = "";
+	let quote: "'" | '"' | null = null;
+	let escaped = false;
+
+	for (let i = 0; i < cmd.length; i++) {
+		const char = cmd[i];
+		const next = cmd[i + 1];
+
+		if (escaped) {
+			current += char;
+			escaped = false;
+			continue;
+		}
+
+		if (char === "\\" && quote !== "'") {
+			current += char;
+			escaped = true;
+			continue;
+		}
+
+		if (char === "'" || char === '"') {
+			if (quote === char) quote = null;
+			else if (quote === null) quote = char;
+			current += char;
+			continue;
+		}
+
+		if (quote === null) {
+			if ((char === "&" && next === "&") || (char === "|" && next === "|")) {
+				parts.push(current);
+				current = "";
+				i++;
+				continue;
+			}
+			if (char === ";" || char === "|") {
+				parts.push(current);
+				current = "";
+				continue;
+			}
+		}
+
+		current += char;
+	}
+
+	parts.push(current);
 	return parts.map((p) => p.trim()).filter((p) => p.length > 0);
 }
 
@@ -340,11 +442,11 @@ export class PermissionsManager {
 
 	private _checkSinglePolicy(type: PolicyType, value: string): PolicyValue {
 		// Session rules take highest priority, then local, then global
-		const sessionResult = this._checkSection(this._session[type], value);
+		const sessionResult = this._checkSection(type, this._session[type], value);
 		if (sessionResult !== null) return sessionResult;
-		const localResult = this._checkSection(this._local[type], value);
+		const localResult = this._checkSection(type, this._local[type], value);
 		if (localResult !== null) return localResult;
-		const globalResult = this._checkSection(this._global[type], value);
+		const globalResult = this._checkSection(type, this._global[type], value);
 		if (globalResult !== null) return globalResult;
 		return this._local.defaultPolicy ?? this._global.defaultPolicy ?? "ask";
 	}
@@ -353,13 +455,14 @@ export class PermissionsManager {
 	 * Check a single PermissionSection. Checks deny first (most restrictive),
 	 * then allow, then ask. Returns null if no pattern matches.
 	 */
-	private _checkSection(section: PermissionSection | undefined, value: string): PolicyValue | null {
+	private _checkSection(type: PolicyType, section: PermissionSection | undefined, value: string): PolicyValue | null {
 		if (!section) return null;
 		// Priority: deny > allow > ask
 		for (const policy of ["deny", "allow", "ask"] as PolicyValue[]) {
 			const patterns = section[policy] ?? [];
 			for (const pattern of patterns) {
-				if (matchesGlob(pattern, value)) return policy;
+				const matches = type === "bash" ? matchesBashPattern(pattern, value) : matchesGlob(pattern, value);
+				if (matches) return policy;
 			}
 		}
 		return null;

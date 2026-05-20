@@ -1,4 +1,4 @@
-import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
+import { Editor, type EditorOptions, type EditorTheme, matchesKey, type TUI } from "@earendil-works/pi-tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.js";
 
 /**
@@ -30,6 +30,17 @@ export class CustomEditor extends Editor {
 	handleInput(data: string): void {
 		// Check extension-registered shortcuts first
 		if (this.onExtensionShortcut?.(data)) {
+			return;
+		}
+
+		if (
+			this.keybindings.matches(data, "tui.input.newLine") ||
+			matchesKey(data, "shift+enter") ||
+			data === "\x1b\r" ||
+			data === "\x1b[13;2~" ||
+			(data.length > 1 && data.includes("\x1b") && data.includes("\r"))
+		) {
+			super.handleInput(data);
 			return;
 		}
 
