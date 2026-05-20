@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { Agent, type AgentMessage, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { type Message, type Model, streamSimple } from "@mariozechner/pi-ai";
+import { Agent, type AgentMessage, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/pi-ai";
 import { getAgentDir } from "../config.js";
 import { AgentSession } from "./agent-session.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
@@ -145,7 +145,12 @@ function getAttributionHeaders(
 		};
 	}
 
-	if (model.provider === "cloudflare-workers-ai" || model.baseUrl.includes("api.cloudflare.com")) {
+	if (
+		model.provider === "cloudflare-workers-ai" ||
+		model.provider === "cloudflare-ai-gateway" ||
+		model.baseUrl.includes("api.cloudflare.com") ||
+		model.baseUrl.includes("gateway.ai.cloudflare.com")
+	) {
 		return {
 			"User-Agent": "pi-coding-agent",
 		};
@@ -163,7 +168,7 @@ function getAttributionHeaders(
  * const { session } = await createAgentSession();
  *
  * // With explicit model
- * import { getModel } from '@mariozechner/pi-ai';
+ * import { getModel } from '@earendil-works/pi-ai';
  * const { session } = await createAgentSession({
  *   model: getModel('anthropic', 'claude-opus-4-5'),
  *   thinkingLevel: 'high',
@@ -183,7 +188,7 @@ function getAttributionHeaders(
  * await loader.reload();
  * const { session } = await createAgentSession({
  *   model: myModel,
- *   tools: [readTool, bashTool],
+ *   tools: ["read", "bash"],
  *   resourceLoader: loader,
  *   sessionManager: SessionManager.inMemory(),
  * });
@@ -261,8 +266,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 
 	// Clamp to model capabilities
-	if (!model || !model.reasoning) {
+	if (!model) {
 		thinkingLevel = "off";
+	} else {
+		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
 	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write", "fast_context", "fast_fetch"];

@@ -4,7 +4,19 @@
 
 import assert from "node:assert";
 import { describe, it } from "node:test";
-import { detectCapabilities, hyperlink, isImageLine } from "../src/terminal-image.js";
+import { Image } from "../src/components/image.js";
+import {
+	deleteAllKittyImages,
+	deleteKittyImage,
+	detectCapabilities,
+	encodeKitty,
+	hyperlink,
+	isImageLine,
+	renderImage,
+	resetCapabilitiesCache,
+	setCapabilities,
+	setCellDimensions,
+} from "../src/terminal-image.js";
 
 const ENV_KEYS = [
 	"TERM",
@@ -15,6 +27,8 @@ const ENV_KEYS = [
 	"GHOSTTY_RESOURCES_DIR",
 	"WEZTERM_PANE",
 	"ITERM_SESSION_ID",
+	"WT_SESSION",
+	"CMUX_WORKSPACE_ID",
 ] as const;
 
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void): void {
@@ -223,6 +237,14 @@ describe("detectCapabilities", () => {
 		});
 	});
 
+	it("does not disable Ghostty images solely because cmux is present", () => {
+		withEnv({ TERM_PROGRAM: "ghostty", CMUX_WORKSPACE_ID: "workspace" }, () => {
+			const caps = detectCapabilities();
+			assert.strictEqual(caps.images, "kitty");
+			assert.strictEqual(caps.hyperlinks, true);
+		});
+	});
+
 	it("enables hyperlinks for Kitty", () => {
 		withEnv({ KITTY_WINDOW_ID: "1" }, () => {
 			const caps = detectCapabilities();
@@ -249,6 +271,130 @@ describe("detectCapabilities", () => {
 			const caps = detectCapabilities();
 			assert.strictEqual(caps.hyperlinks, true);
 		});
+	});
+
+	it("detects truecolor for Windows Terminal outside multiplexers", () => {
+		withEnv({ WT_SESSION: "session", TERM: "xterm-256color" }, () => {
+			const caps = detectCapabilities();
+			assert.strictEqual(caps.trueColor, true);
+		});
+	});
+
+	it("does not inherit Windows Terminal truecolor through tmux", () => {
+		withEnv({ WT_SESSION: "session", TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			const caps = detectCapabilities();
+			assert.strictEqual(caps.trueColor, false);
+			assert.strictEqual(caps.hyperlinks, false);
+			assert.strictEqual(caps.images, null);
+		});
+	});
+
+	it("trusts explicit truecolor hints through tmux", () => {
+		withEnv({ COLORTERM: "truecolor", TMUX: "/tmp/tmux-1000/default,1234,0", TERM: "tmux-256color" }, () => {
+			const caps = detectCapabilities();
+			assert.strictEqual(caps.trueColor, true);
+			assert.strictEqual(caps.hyperlinks, false);
+			assert.strictEqual(caps.images, null);
+		});
+	});
+});
+
+describe("Kitty image cursor movement", () => {
+	it("can request no terminal-side cursor movement", () => {
+		const sequence = encodeKitty("AAAA", { columns: 2, rows: 2, moveCursor: false });
+		assert.ok(sequence.startsWith("\x1b_Ga=T,f=100,q=2,C=1,c=2,r=2;"));
+	});
+
+	it("suppresses Kitty replies for delete commands", () => {
+		assert.strictEqual(deleteKittyImage(42), "\x1b_Ga=d,d=I,i=42,q=2\x1b\\");
+		assert.strictEqual(deleteAllKittyImages(), "\x1b_Ga=d,d=A,q=2\x1b\\");
+	});
+
+	it("preserves renderImage's default terminal-side cursor movement", () => {
+		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		setCellDimensions({ widthPx: 10, heightPx: 10 });
+		try {
+			const result = renderImage("AAAA", { widthPx: 20, heightPx: 20 }, { maxWidthCells: 2 });
+			assert.ok(result);
+			assert.ok(!result.sequence.includes(",C=1,"));
+			assert.strictEqual(result.rows, 2);
+		} finally {
+			resetCapabilitiesCache();
+			setCellDimensions({ widthPx: 9, heightPx: 18 });
+		}
+	});
+
+	it("can opt renderImage into no terminal-side cursor movement", () => {
+		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		setCellDimensions({ widthPx: 10, heightPx: 10 });
+		try {
+			const result = renderImage("AAAA", { widthPx: 20, heightPx: 20 }, { maxWidthCells: 2, moveCursor: false });
+			assert.ok(result);
+			assert.ok(result.sequence.includes(",C=1,"));
+			assert.strictEqual(result.rows, 2);
+		} finally {
+			resetCapabilitiesCache();
+			setCellDimensions({ widthPx: 9, heightPx: 18 });
+		}
+	});
+
+	it("honors maxHeightCells by reducing rendered width", () => {
+		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		setCellDimensions({ widthPx: 10, heightPx: 10 });
+		try {
+			const result = renderImage("AAAA", { widthPx: 10, heightPx: 100 }, { maxWidthCells: 10, maxHeightCells: 5 });
+			assert.ok(result);
+			assert.strictEqual(result.rows, 5);
+			assert.ok(result.sequence.includes(",c=1,r=5"));
+		} finally {
+			resetCapabilitiesCache();
+			setCellDimensions({ widthPx: 9, heightPx: 18 });
+		}
+	});
+
+	it("caps Image component height to a square pixel box by default", () => {
+		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		setCellDimensions({ widthPx: 10, heightPx: 20 });
+		try {
+			const image = new Image(
+				"AAAA",
+				"image/png",
+				{ fallbackColor: (value) => value },
+				{ maxWidthCells: 10 },
+				{ widthPx: 10, heightPx: 100 },
+			);
+			const lines = image.render(12);
+			assert.strictEqual(lines.length, 5);
+			assert.ok(lines[0].includes(",c=1,r=5"));
+		} finally {
+			resetCapabilitiesCache();
+			setCellDimensions({ widthPx: 9, heightPx: 18 });
+		}
+	});
+
+	it("places image sequence on first line with empty padding rows", () => {
+		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		setCellDimensions({ widthPx: 10, heightPx: 10 });
+		try {
+			const image = new Image(
+				"AAAA",
+				"image/png",
+				{ fallbackColor: (value) => value },
+				{ maxWidthCells: 2 },
+				{ widthPx: 20, heightPx: 20 },
+			);
+			const lines = image.render(4);
+			const imageId = image.getImageId();
+			assert.strictEqual(typeof imageId, "number");
+			assert.ok(lines[0].startsWith("\x1b_G"));
+			assert.ok(lines[0].includes(",C=1,"));
+			assert.ok(lines[0].includes(`,i=${imageId}`));
+			assert.ok(lines[0].endsWith("\x1b\\"));
+			assert.deepStrictEqual(lines.slice(1, lines.length), [""]);
+		} finally {
+			resetCapabilitiesCache();
+			setCellDimensions({ widthPx: 9, heightPx: 18 });
+		}
 	});
 });
 

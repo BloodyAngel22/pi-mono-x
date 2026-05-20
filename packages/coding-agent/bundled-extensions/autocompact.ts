@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const NUDGE_THRESHOLD = 75;
 const AUTO_COMPACT_THRESHOLD = 90;

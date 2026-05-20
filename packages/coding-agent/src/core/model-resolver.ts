@@ -2,8 +2,8 @@
  * Model resolution, scoping, and initial selection
  */
 
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@mariozechner/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.js";
@@ -19,8 +19,6 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"openai-codex": "gpt-5.5",
 	deepseek: "deepseek-v4-pro",
 	google: "gemini-3.1-pro-preview",
-	"google-gemini-cli": "gemini-3.1-pro-preview",
-	"google-antigravity": "gemini-3.1-pro-high",
 	"google-vertex": "gemini-3.1-pro-preview",
 	"github-copilot": "gpt-5.4",
 	openrouter: "moonshotai/kimi-k2.6",
@@ -36,10 +34,16 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"moonshotai-cn": "kimi-k2.6",
 	huggingface: "moonshotai/Kimi-K2.6",
 	fireworks: "accounts/fireworks/models/kimi-k2p6",
+	together: "moonshotai/Kimi-K2.6",
 	opencode: "kimi-k2.6",
 	"opencode-go": "kimi-k2.6",
 	"kimi-coding": "kimi-for-coding",
 	"cloudflare-workers-ai": "@cf/moonshotai/kimi-k2.6",
+	"cloudflare-ai-gateway": "workers-ai/@cf/moonshotai/kimi-k2.6",
+	xiaomi: "mimo-v2.5-pro",
+	"xiaomi-token-plan-cn": "mimo-v2.5-pro",
+	"xiaomi-token-plan-ams": "mimo-v2.5-pro",
+	"xiaomi-token-plan-sgp": "mimo-v2.5-pro",
 };
 
 export interface ScopedModel {

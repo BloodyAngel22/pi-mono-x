@@ -1,6 +1,6 @@
 {
-	"name": "@mariozechner/pi-coding-agent",
-	"version": "0.70.6",
+	"name": "@earendil-works/pi-coding-agent",
+	"version": "0.75.3",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
 	"piConfig": {
@@ -38,27 +38,23 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"dependencies": {
+		"@earendil-works/pi-agent-core": "^0.75.3",
+		"@earendil-works/pi-ai": "^0.75.3",
+		"@earendil-works/pi-tui": "^0.75.3",
 		"@modelcontextprotocol/sdk": "^1.11.0",
-		"@mariozechner/jiti": "^2.6.2",
-		"@mariozechner/pi-agent-core": "^0.70.6",
-		"@mariozechner/pi-ai": "^0.70.6",
-		"@mariozechner/pi-tui": "^0.70.6",
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"chalk": "^5.5.0",
-		"cli-highlight": "^2.1.11",
+		"cross-spawn": "^7.0.6",
 		"diff": "^8.0.2",
-		"extract-zip": "^2.0.1",
-		"file-type": "^21.1.1",
 		"glob": "^13.0.1",
+		"highlight.js": "^10.7.3",
 		"hosted-git-info": "^9.0.2",
 		"ignore": "^7.0.5",
-		"marked": "^15.0.12",
+		"jiti": "^2.7.0",
 		"minimatch": "^10.2.3",
 		"proper-lockfile": "^4.1.2",
-		"strip-ansi": "^7.1.0",
 		"typebox": "^1.1.24",
-		"undici": "^7.19.1",
-		"uuid": "^14.0.0",
+		"undici": "^8.3.0",
 		"yaml": "^2.8.2"
 	},
 	"overrides": {
@@ -68,9 +64,10 @@
 		}
 	},
 	"optionalDependencies": {
-		"@mariozechner/clipboard": "^0.3.5"
+		"@mariozechner/clipboard": "^0.3.6"
 	},
 	"devDependencies": {
+		"@types/cross-spawn": "^6.0.6",
 		"@types/diff": "^7.0.2",
 		"@types/hosted-git-info": "^3.0.5",
 		"@types/ms": "^2.1.0",
@@ -92,10 +89,10 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/badlogic/pi-mono.git",
+		"url": "git+https://github.com/earendil-works/pi-mono.git",
 		"directory": "packages/coding-agent"
 	},
 	"engines": {
-		"node": ">=20.6.0"
+		"node": ">=22.19.0"
 	}
 }

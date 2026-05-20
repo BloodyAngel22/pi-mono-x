@@ -5,9 +5,9 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Agent } from "@mariozechner/pi-agent-core";
-import { getModel, type OAuthCredentials, type OAuthProvider } from "@mariozechner/pi-ai";
-import { getOAuthApiKey } from "@mariozechner/pi-ai/oauth";
+import { Agent } from "@earendil-works/pi-agent-core";
+import { getModel, type OAuthCredentials, type OAuthProvider } from "@earendil-works/pi-ai";
+import { getOAuthApiKey } from "@earendil-works/pi-ai/oauth";
 import { AgentSession } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { createEventBus } from "../src/core/event-bus.js";
@@ -71,7 +71,6 @@ function saveAuthStorage(storage: AuthStorageData): void {
  * For API key credentials, returns the key directly.
  * For OAuth credentials, returns the access token (refreshing if expired and saving back).
  *
- * For google-gemini-cli and google-antigravity, returns JSON-encoded { token, projectId }
  */
 export async function resolveApiKey(provider: string): Promise<string | undefined> {
 	const storage = loadAuthStorage();

@@ -2,18 +2,159 @@
 
 ## [Unreleased]
 
-### Added
+### Fixed
 
-- Added `AssistantMessage.responseModel` on the openai-completions path: surfaces the concrete `chunk.model` when it differs from the requested id (e.g. OpenRouter `auto` -> `anthropic/...`).
+- Fixed OpenAI-compatible `streamSimple()` requests to stop sending model-derived default output token caps, avoiding context-window reservation failures on servers such as vLLM while preserving explicit `maxTokens` and required Anthropic `max_tokens` handling ([#4675](https://github.com/earendil-works/pi/issues/4675)).
+- Fixed OpenAI prompt cache keys to clamp session-derived values to the 64-character API limit across OpenAI Responses, Chat Completions, Codex Responses, and Azure OpenAI Responses ([#4720](https://github.com/earendil-works/pi/issues/4720)).
+
+## [0.75.3] - 2026-05-18
+
+## [0.75.2] - 2026-05-18
 
 ### Fixed
 
+- Fixed Xiaomi MiMo generated model metadata to replay assistant tool-call messages with `reasoning_content` for thinking-mode multi-turn requests ([#4678](https://github.com/earendil-works/pi/issues/4678)).
+
+## [0.75.1] - 2026-05-18
+
+### Fixed
+
+- Fixed Anthropic-compatible API-key requests to ignore unrelated `ANTHROPIC_AUTH_TOKEN` environment values, avoiding invalid bearer credentials for providers such as Xiaomi MiMo ([#4342](https://github.com/earendil-works/pi/issues/4342)).
+- Fixed Amazon Bedrock message conversion to skip unknown content blocks instead of failing the stream ([#4223](https://github.com/earendil-works/pi/issues/4223)).
+- Fixed Azure OpenAI Responses and OpenAI Responses error formatting to prefix HTTP status codes onto `errorMessage`, so transient 5xx and 429 errors are correctly matched by the agent-level auto-retry classifier ([#4232](https://github.com/earendil-works/pi/issues/4232)).
+- Fixed Xiaomi MiMo model metadata to use the OpenAI-compatible endpoints and `openai-completions` API, restoring multi-turn thinking/tool-call sessions ([#4505](https://github.com/earendil-works/pi/issues/4505)).
+- Fixed OpenCode Go Kimi reasoning replay by normalizing streamed `reasoning` fields back to `reasoning_content` for OpenCode Go only ([#4251](https://github.com/earendil-works/pi/issues/4251)).
+
+### Removed
+
+- Removed non-working OpenAI Codex fast model variants.
+
+## [0.75.0] - 2026-05-17
+
+### Breaking Changes
+
+- Raised the minimum supported Node.js version to 22.19.0.
+
+### Fixed
+
+- Fixed OpenAI Codex generated model metadata to use the current upstream model list ([#4603](https://github.com/earendil-works/pi-mono/pull/4603) by [@mattiacerutti](https://github.com/mattiacerutti)).
+- Fixed GitHub Copilot GPT model thinking metadata to map unsupported minimal thinking to low ([#4622](https://github.com/earendil-works/pi-mono/pull/4622) by [@mattiacerutti](https://github.com/mattiacerutti)).
+- Fixed `streamSimple()` defaults for models whose advertised output limit is effectively their full context window to avoid impossible default requests ([#4614](https://github.com/earendil-works/pi/issues/4614)).
+
+## [0.74.1] - 2026-05-16
+
+### Added
+
+- Added image generation APIs, image model metadata, and built-in OpenRouter image generation support ([#3887](https://github.com/earendil-works/pi-mono/pull/3887) by [@cristinaponcela](https://github.com/cristinaponcela)).
+- Added Together AI as a built-in OpenAI-compatible provider with generated model metadata and `TOGETHER_API_KEY` authentication ([#3624](https://github.com/earendil-works/pi-mono/pull/3624) by [@Nutlope](https://github.com/Nutlope)).
+
+### Fixed
+
+- Fixed GitHub Copilot model availability to ignore generic `GH_TOKEN` and `GITHUB_TOKEN` environment variables, requiring OAuth login or `COPILOT_GITHUB_TOKEN` instead ([#4485](https://github.com/earendil-works/pi/issues/4485)).
+- Fixed `openai-completions` streams to surface an error when the stream ends before any terminal `finish_reason`, so truncated responses can retry instead of being accepted as success ([#4345](https://github.com/earendil-works/pi/issues/4345)).
+- Fixed Fireworks provider caching compatibility by adding session affinity headers and model metadata compat settings ([#4358](https://github.com/earendil-works/pi-mono/pull/4358) by [@yanirz](https://github.com/yanirz)).
+- Fixed OpenAI Codex WebSocket transport to respect proxy environment variables under Bun ([#4354](https://github.com/earendil-works/pi-mono/pull/4354) by [@haoqixu](https://github.com/haoqixu)).
+- Fixed OpenRouter cache usage normalization to preserve cached-token semantics without treating cached tokens as cache writes.
+- Fixed Bedrock proxy handling to preserve `NO_PROXY` exclusions while using HTTP(S)-only proxy agents.
+- Fixed compiled Bun binaries failing to start outside the repo when Bedrock proxy support tried to resolve `proxy-from-env` from external `node_modules` ([#4513](https://github.com/earendil-works/pi/issues/4513)).
+- Fixed GitHub Copilot Claude test coverage to use the current Claude Sonnet 4.6 model ID.
+- Fixed OpenAI Responses requests for models that support disabling reasoning to send `reasoning.effort: "none"` when thinking is off.
+- Fixed Inception Mercury 2 tool calling on OpenRouter by marking `off` as unsupported in `thinkingLevelMap`, so the openai-completions provider omits the reasoning param instead of defaulting to `{reasoning:{effort:"none"}}` (which puts Mercury 2 in instant mode, disabling tool calls).
+- Fixed OpenAI Codex SSE retries to honor `retry-after-ms` and `retry-after` headers before falling back to exponential backoff.
+- Fixed context overflow detection for LiteLLM-wrapped OpenAI-compatible errors using `exceeds the model's maximum context length of ... tokens` wording ([#4563](https://github.com/earendil-works/pi/issues/4563)).
+- Fixed `streamSimple()` defaults to respect model output limits above 32000 tokens instead of clamping provider requests to 32000 ([#4539](https://github.com/earendil-works/pi/issues/4539)).
+
+## [0.74.0] - 2026-05-07
+
+## [0.73.1] - 2026-05-07
+
+### Added
+
+- Added OAuth login flow metadata so clients can present interactive provider choices during login ([#4190](https://github.com/earendil-works/pi-mono/pull/4190) by [@mitsuhiko](https://github.com/mitsuhiko)).
+
+### Fixed
+
+- Fixed OpenAI Responses reasoning text streaming for LM Studio and other compatible providers that emit `response.reasoning_text.delta` events ([#4191](https://github.com/badlogic/pi-mono/pull/4191) by [@yaanfpv](https://github.com/yaanfpv)).
+- Fixed OpenAI Codex OAuth refresh failures writing directly to stderr while the TUI is active ([#4141](https://github.com/badlogic/pi-mono/issues/4141)).
+- Fixed OpenAI-compatible chat completion streams that interleave content and tool-call deltas in the same choice.
+- Fixed the Kimi K2 P6 model alias to normalize to `kimi-for-coding` ([#4218](https://github.com/earendil-works/pi-mono/issues/4218)).
+- Fixed OpenAI Codex Responses requests to send a non-empty system prompt ([#4184](https://github.com/earendil-works/pi-mono/issues/4184)).
+
+## [0.73.0] - 2026-05-04
+
+### Breaking Changes
+
+- Switched the built-in `xiaomi` provider endpoint from Token Plan AMS (`https://token-plan-ams.xiaomimimo.com/anthropic`) to API billing (`https://api.xiaomimimo.com/anthropic`). `XIAOMI_API_KEY` now refers to the API billing key from [platform.xiaomimimo.com](https://platform.xiaomimimo.com). Users still on Token Plan must move to the appropriate `xiaomi-token-plan-*` provider and set the corresponding env var ([#4112](https://github.com/badlogic/pi-mono/pull/4112) by [@Phoen1xCode](https://github.com/Phoen1xCode)).
+
+### Added
+
+- Added Xiaomi MiMo Token Plan regional providers with per-region env vars: `xiaomi-token-plan-cn` (`XIAOMI_TOKEN_PLAN_CN_API_KEY`), `xiaomi-token-plan-ams` (`XIAOMI_TOKEN_PLAN_AMS_API_KEY`), and `xiaomi-token-plan-sgp` (`XIAOMI_TOKEN_PLAN_SGP_API_KEY`) ([#4112](https://github.com/badlogic/pi-mono/pull/4112) by [@Phoen1xCode](https://github.com/Phoen1xCode)).
+- Added `registerSessionResourceCleanup()` and `cleanupSessionResources()` so providers can register cleanup hooks for session-scoped resources.
+
+### Fixed
+
+- Fixed generated OpenAI-compatible model metadata for Qwen 3.5/3.6 and MiniMax M2.7 to match models.dev and OpenCode Go ([#4110](https://github.com/badlogic/pi-mono/pull/4110) by [@jsynowiec](https://github.com/jsynowiec)).
+- Fixed Bedrock Converse thinking effort mapping to preserve native `xhigh` for Claude Opus 4.7.
+- Fixed OpenAI Codex Responses WebSocket transport to fall back to SSE when setup fails before streaming starts, and attach transport diagnostics to the assistant message ([#4133](https://github.com/badlogic/pi-mono/issues/4133)).
+
+## [0.72.1] - 2026-05-02
+
+## [0.72.0] - 2026-05-01
+
+### Breaking Changes
+
+- Replaced `OpenAICompletionsCompat.reasoningEffortMap` with top-level `Model.thinkingLevelMap` for model-specific thinking controls ([#3208](https://github.com/badlogic/pi-mono/issues/3208)). Migration: move mappings from `model.compat.reasoningEffortMap` to `model.thinkingLevelMap`. See `packages/ai/README.md#custom-models` and `packages/coding-agent/docs/models.md#thinking-level-map`. Map values keep the same provider-specific string semantics, and `null` marks a pi thinking level unsupported. Example:
+  ```ts
+  // Before
+  compat: { reasoningEffortMap: { high: "high", xhigh: "max" } }
+
+  // After
+  thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", xhigh: "max" }
+  ```
+- Removed `supportsXhigh()`. Migration: use `getSupportedThinkingLevels(model).includes("xhigh")` or `clampThinkingLevel(model, requestedLevel)` instead ([#3208](https://github.com/badlogic/pi-mono/issues/3208)).
+
+### Added
+
+- Added Xiaomi MiMo Token Plan provider (Anthropic-compatible) with `XIAOMI_API_KEY` authentication ([#4005](https://github.com/badlogic/pi-mono/pull/4005) by [@Phoen1xCode](https://github.com/Phoen1xCode)).
+- Added `Model.thinkingLevelMap`, `getSupportedThinkingLevels()`, and `clampThinkingLevel()` so model metadata can describe supported thinking levels and provider-specific level values ([#3208](https://github.com/badlogic/pi-mono/issues/3208)).
+
+### Fixed
+
+- Fixed OpenAI Codex Responses `streamSimple()` to honor the configured transport instead of always using SSE, and made `auto` the default transport with cached WebSocket context when available ([#4083](https://github.com/badlogic/pi-mono/issues/4083)).
+- Fixed Xiaomi MiMo model catalog to use the Token Plan Anthropic endpoint instead of the direct API ([#3912](https://github.com/badlogic/pi-mono/issues/3912)).
+
+## [0.71.1] - 2026-05-01
+
+### Added
+
+- Added `websocket-cached` transport support for OpenAI Codex Responses used with ChatGPT subscription auth. This keeps the same WebSocket open for a session and, after the first request, sends only new conversation items instead of resending the full chat history when possible.
+
+## [0.71.0] - 2026-04-30
+
+### Breaking Changes
+
+- Removed built-in Google Gemini CLI and Google Antigravity support, including provider registration, model metadata, OAuth, and package exports. Existing callers must switch to another supported provider.
+
+### Added
+
+- Added Cloudflare AI Gateway as a built-in provider with OpenAI, Anthropic, and Workers AI gateway routing plus `CLOUDFLARE_API_KEY`/`CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_GATEWAY_ID` authentication ([#3856](https://github.com/badlogic/pi-mono/pull/3856) by [@mchenco](https://github.com/mchenco)).
+- Added Moonshot AI as a built-in OpenAI-compatible provider with model catalog generation and `MOONSHOT_API_KEY` authentication.
+- Added Mistral Medium 3.5 model metadata and reasoning-mode handling ([#4009](https://github.com/badlogic/pi-mono/pull/4009) by [@technocidal](https://github.com/technocidal)).
+- Added `AssistantMessage.responseModel` on the openai-completions path: surfaces the concrete `chunk.model` when it differs from the requested id (e.g. OpenRouter `auto` -> `anthropic/...`) ([#3968](https://github.com/badlogic/pi-mono/pull/3968) by [@purrgrammer](https://github.com/purrgrammer)).
+
+### Fixed
+
+- Fixed Google Vertex Gemini 3 tool call replay by no longer sending the non-Vertex `skip_thought_signature_validator` sentinel for unsigned tool calls ([#4032](https://github.com/badlogic/pi-mono/issues/4032)).
 - Updated `@anthropic-ai/sdk` to `^0.91.1` to clear GHSA-p7fg-763f-g4gf audit findings ([#3992](https://github.com/badlogic/pi-mono/issues/3992)).
 - Fixed DeepSeek V4 Flash `xhigh` thinking support so requests preserve `xhigh` and map it to DeepSeek's `max` reasoning effort ([#3944](https://github.com/badlogic/pi-mono/issues/3944)).
 - Fixed Anthropic streams that end before `message_stop` to be treated as errors instead of successful partial responses ([#3936](https://github.com/badlogic/pi-mono/issues/3936)).
 - Fixed generated OpenAI-compatible DeepSeek V4 models to carry the provider-specific reasoning effort mapping outside the direct DeepSeek provider ([#3940](https://github.com/badlogic/pi-mono/issues/3940)).
 - Fixed DeepSeek V4 Flash and V4 Pro pricing metadata to match current official rates ([#3910](https://github.com/badlogic/pi-mono/issues/3910)).
 - Fixed DeepSeek prompt cache hits to be tracked from `prompt_cache_hit_tokens` in OpenAI-compatible usage responses ([#3880](https://github.com/badlogic/pi-mono/issues/3880)).
+
+### Removed
+
+- Removed built-in Google Gemini CLI and Google Antigravity provider, model, OAuth, and export support.
 
 ## [0.70.6] - 2026-04-28
 

@@ -138,6 +138,8 @@ pi list                      # List installed packages
 pi config                    # Enable/disable package resources
 ```
 
+These commands manage pi packages, not the pi CLI installation. To uninstall pi itself, see [Quickstart](quickstart.md#uninstall).
+
 See [Pi Packages](packages.md) for package sources and security notes.
 
 ### Modes
@@ -265,6 +267,7 @@ pi -p --max-turns 5 --no-session "Run the tests and fix any failures"
 | Variable | Description |
 |----------|-------------|
 | `PI_CODING_AGENT_DIR` | Override config directory; default is `~/.pi/agent` |
+| `PI_CODING_AGENT_SESSION_DIR` | Override session storage directory; overridden by `--session-dir` |
 | `PI_PACKAGE_DIR` | Override package directory, useful for Nix/Guix store paths |
 | `PI_OFFLINE` | Disable startup network operations, including update checks, package update checks, and install/update telemetry |
 | `PI_SKIP_VERSION_CHECK` | Skip the Pi version update check at startup. This prevents the `pi.dev` latest-version request |

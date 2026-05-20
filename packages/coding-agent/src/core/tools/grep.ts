@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { Text } from "@mariozechner/pi-tui";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { Text } from "@earendil-works/pi-tui";
 import { spawn } from "child_process";
 import { readFileSync, statSync } from "fs";
 import path from "path";
@@ -215,7 +215,7 @@ export function createGrepToolDefinition(
 						if (ignoreCase) args.push("--ignore-case");
 						if (literal) args.push("--fixed-strings");
 						if (glob) args.push("--glob", glob);
-						args.push(pattern, searchPath);
+						args.push("--", pattern, searchPath);
 
 						const child = spawn(rgPath, args, { stdio: ["ignore", "pipe", "pipe"] });
 						const rl = createInterface({ input: child.stdout });

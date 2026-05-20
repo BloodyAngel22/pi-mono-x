@@ -1,10 +1,21 @@
 {
-	"name": "@mariozechner/pi-agent-core",
-	"version": "0.70.6",
+	"name": "@earendil-works/pi-agent-core",
+	"version": "0.75.3",
 	"description": "General-purpose agent with transport abstraction, state management, and attachment support",
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./node": {
+			"types": "./dist/node.d.ts",
+			"import": "./dist/node.js"
+		},
+		"./package.json": "./package.json"
+	},
 	"files": [
 		"dist",
 		"README.md"
@@ -14,11 +25,15 @@
 		"build": "tsgo -p tsconfig.build.json",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"test": "vitest --run",
+		"test:harness": "vitest --run --config vitest.harness.config.ts",
+		"coverage:harness": "vitest --run --config vitest.harness.config.ts --coverage",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"dependencies": {
-		"@mariozechner/pi-ai": "^0.70.6",
-		"typebox": "^1.1.24"
+		"@earendil-works/pi-ai": "^0.75.3",
+		"ignore": "^7.0.5",
+		"typebox": "^1.1.24",
+		"yaml": "^2.8.2"
 	},
 	"keywords": [
 		"ai",
@@ -31,14 +46,15 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/badlogic/pi-mono.git",
+		"url": "git+https://github.com/earendil-works/pi-mono.git",
 		"directory": "packages/agent"
 	},
 	"engines": {
-		"node": ">=20.0.0"
+		"node": ">=22.19.0"
 	},
 	"devDependencies": {
 		"@types/node": "^24.3.0",
+		"@vitest/coverage-v8": "^3.2.4",
 		"typescript": "^5.7.3",
 		"vitest": "^3.2.4"
 	}

@@ -4,7 +4,7 @@
  * Replace everything - no discovery, explicit configuration.
  */
 
-import { getModel } from "@mariozechner/pi-ai";
+import { getModel } from "@earendil-works/pi-ai";
 import {
 	AuthStorage,
 	createAgentSession,
@@ -13,7 +13,7 @@ import {
 	type ResourceLoader,
 	SessionManager,
 	SettingsManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 // Custom auth storage location
 const authStorage = AuthStorage.create("/tmp/my-agent/auth.json");
@@ -65,11 +65,15 @@ const { session } = await createAgentSession({
 	settingsManager,
 });
 
-session.subscribe((event) => {
-	if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-		process.stdout.write(event.assistantMessageEvent.delta);
-	}
-});
+try {
+	session.subscribe((event) => {
+		if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+			process.stdout.write(event.assistantMessageEvent.delta);
+		}
+	});
 
-await session.prompt("List files in the current directory.");
-console.log();
+	await session.prompt("List files in the current directory.");
+	console.log();
+} finally {
+	session.dispose();
+}

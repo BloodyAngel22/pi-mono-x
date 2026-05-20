@@ -4,8 +4,8 @@
  * Shows how to select a specific model and thinking level.
  */
 
-import { getModel } from "@mariozechner/pi-ai";
-import { AuthStorage, createAgentSession, ModelRegistry } from "@mariozechner/pi-coding-agent";
+import { getModel } from "@earendil-works/pi-ai";
+import { AuthStorage, createAgentSession, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 // Set up auth storage and model registry
 const authStorage = AuthStorage.create();
@@ -38,12 +38,16 @@ if (available.length > 0) {
 		modelRegistry,
 	});
 
-	session.subscribe((event) => {
-		if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-			process.stdout.write(event.assistantMessageEvent.delta);
-		}
-	});
+	try {
+		session.subscribe((event) => {
+			if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+				process.stdout.write(event.assistantMessageEvent.delta);
+			}
+		});
 
-	await session.prompt("Say hello in one sentence.");
-	console.log();
+		await session.prompt("Say hello in one sentence.");
+		console.log();
+	} finally {
+		session.dispose();
+	}
 }

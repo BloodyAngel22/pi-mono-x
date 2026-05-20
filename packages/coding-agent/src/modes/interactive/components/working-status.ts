@@ -1,5 +1,5 @@
-import type { Usage } from "@mariozechner/pi-ai";
-import { type Component, type TUI, truncateToWidth } from "@mariozechner/pi-tui";
+import type { Usage } from "@earendil-works/pi-ai";
+import { type Component, type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.js";
 
 const SPINNER_FRAMES = ["✶", "✸", "✹", "✺", "✹", "✷"];

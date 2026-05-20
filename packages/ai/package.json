@@ -1,6 +1,6 @@
 {
-	"name": "@mariozechner/pi-ai",
-	"version": "0.70.6",
+	"name": "@earendil-works/pi-ai",
+	"version": "0.75.3",
 	"description": "Unified LLM API with automatic model discovery and provider configuration",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -21,10 +21,6 @@
 		"./google": {
 			"types": "./dist/providers/google.d.ts",
 			"import": "./dist/providers/google.js"
-		},
-		"./google-gemini-cli": {
-			"types": "./dist/providers/google-gemini-cli.d.ts",
-			"import": "./dist/providers/google-gemini-cli.js"
 		},
 		"./google-vertex": {
 			"types": "./dist/providers/google-vertex.d.ts",
@@ -65,7 +61,8 @@
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"generate-models": "npx tsx scripts/generate-models.ts",
-		"build": "npm run generate-models && tsgo -p tsconfig.build.json",
+		"generate-image-models": "npx tsx scripts/generate-image-models.ts",
+		"build": "npm run generate-models && npm run generate-image-models && tsgo -p tsconfig.build.json",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"dev:tsc": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"test": "vitest --run",
@@ -76,13 +73,11 @@
 		"@aws-sdk/client-bedrock-runtime": "^3.1030.0",
 		"@google/genai": "^1.40.0",
 		"@mistralai/mistralai": "^2.2.0",
-		"typebox": "^1.1.24",
-		"chalk": "^5.6.2",
+		"http-proxy-agent": "^7.0.2",
+		"https-proxy-agent": "^7.0.6",
 		"openai": "6.26.0",
 		"partial-json": "^0.1.7",
-		"proxy-agent": "^6.5.0",
-		"undici": "^7.19.1",
-		"zod-to-json-schema": "^3.24.6"
+		"typebox": "^1.1.24"
 	},
 	"keywords": [
 		"ai",
@@ -98,11 +93,11 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/badlogic/pi-mono.git",
+		"url": "git+https://github.com/earendil-works/pi-mono.git",
 		"directory": "packages/ai"
 	},
 	"engines": {
-		"node": ">=20.0.0"
+		"node": ">=22.19.0"
 	},
 	"devDependencies": {
 		"@types/node": "^24.3.0",

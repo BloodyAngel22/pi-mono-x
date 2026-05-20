@@ -1,9 +1,9 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import type { Model } from "@mariozechner/pi-ai";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
-import { Input, matchesKey, Key, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { Input, matchesKey, Key, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const FAVORITES_FILE = path.join(homedir(), ".pi", "agent", "favorites.json");
 const FAVORITES_BACKUP = path.join(homedir(), ".pi", "agent", "favorites.json.bak");

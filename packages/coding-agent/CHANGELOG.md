@@ -17,11 +17,27 @@
 - Fixed MCP startup to stop blocking indefinitely: server initialization now has a 5 second soft timeout, continues in the background, and retries unavailable servers with backoff.
 - Fixed `write` and `edit` tool rendering to show a distinct file-operation block with path, status, and change statistics.
 - Fixed session tree navigation so the selected active branch persists across `/resume`, session switches, and pi restarts.
+- Fixed the system prompt to tell models to resolve pi docs and examples under the absolute package paths before reading topic-specific relative references ([#4752](https://github.com/earendil-works/pi/issues/4752)).
+- Fixed extension `ctx.abort()` during tool-call preflight to stop later confirmations and restore queued interactive input like Escape ([#4276](https://github.com/earendil-works/pi/issues/4276)).
+- Fixed AgentSession retry, compaction, and event settlement to use the awaited agent lifecycle instead of a separate event queue, and added `willRetry` to `agent_end` session events.
+- Fixed the subagent extension's parallel mode to return useful per-task output and failed-task diagnostics to the parent model instead of 100-character previews ([#4710](https://github.com/earendil-works/pi/issues/4710)).
+- Fixed Windows local bash execution to hide helper console windows when launched from background SDK processes ([#4699](https://github.com/earendil-works/pi/issues/4699)).
 - Updated `@mariozechner/clipboard` to an attested release so package managers with trust policies do not reject installs ([#3946](https://github.com/badlogic/pi-mono/issues/3946)).
 - Fixed project context discovery to load `AGENTS.MD` files in addition to `AGENTS.md` ([#3949](https://github.com/badlogic/pi-mono/issues/3949)).
 - Fixed `/handoff` to use compacted session context instead of pre-compaction raw messages ([#3945](https://github.com/badlogic/pi-mono/issues/3945)).
+- Fixed DeepSeek V4 Flash `xhigh` thinking support so requests map to DeepSeek's `max` reasoning effort ([#3944](https://github.com/badlogic/pi-mono/issues/3944)).
+- Fixed Anthropic streams that end before `message_stop` to be treated as errors instead of successful partial responses ([#3936](https://github.com/badlogic/pi-mono/issues/3936)).
+- Fixed generated OpenAI-compatible DeepSeek V4 reasoning compatibility outside the direct DeepSeek provider ([#3940](https://github.com/badlogic/pi-mono/issues/3940)).
 - Fixed idle follow-up submission to clear the editor like normal message submission ([#3926](https://github.com/badlogic/pi-mono/issues/3926)).
+- Fixed editor rendering artifacts for Thai Sara Am and Lao AM vowel characters ([#3904](https://github.com/badlogic/pi-mono/issues/3904)).
+- Fixed DeepSeek V4 Flash and V4 Pro pricing metadata to match current official rates ([#3910](https://github.com/badlogic/pi-mono/issues/3910)).
 - Updated the sandbox extension example lockfile to resolve the vulnerable `lodash-es` transitive dependency ([#3901](https://github.com/badlogic/pi-mono/issues/3901)).
+- Fixed DeepSeek prompt cache hits to be tracked from OpenAI-compatible usage responses ([#3880](https://github.com/badlogic/pi-mono/issues/3880)).
+
+### Removed
+
+- Removed the discontinued Qwen CLI OAuth custom provider extension example ([#3832](https://github.com/badlogic/pi-mono/pull/3832) by [@4h9fbZ](https://github.com/4h9fbZ)).
+- Removed Google Gemini CLI and Google Antigravity built-in login, default model, documentation, and example extension support.
 
 ## [0.70.6] - 2026-04-28
 

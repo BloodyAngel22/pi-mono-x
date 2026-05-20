@@ -32,6 +32,7 @@ import { headersToRecord } from "../utils/headers.js";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 
+import { resolveCloudflareBaseUrl } from "./cloudflare.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { adjustMaxTokensForThinking, buildBaseOptions } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
@@ -164,9 +165,16 @@ const FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 
 function getAnthropicCompat(model: Model<"anthropic-messages">): Required<AnthropicMessagesCompat> {
+	// Auto-detect session affinity and cache control support from provider
+	const isFireworks = model.provider === "fireworks";
+	const isCloudflareAiGatewayAnthropic =
+		model.provider === "cloudflare-ai-gateway" && model.baseUrl.includes("anthropic");
 	return {
-		supportsEagerToolInputStreaming: model.compat?.supportsEagerToolInputStreaming ?? true,
-		supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? true,
+		supportsEagerToolInputStreaming: model.compat?.supportsEagerToolInputStreaming ?? !isFireworks,
+		supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? !isFireworks,
+		sendSessionAffinityHeaders:
+			model.compat?.sendSessionAffinityHeaders ?? !!(isFireworks || isCloudflareAiGatewayAnthropic),
+		supportsCacheControlOnTools: model.compat?.supportsCacheControlOnTools ?? !isFireworks,
 	};
 }
 
@@ -215,8 +223,8 @@ export interface AnthropicOptions extends StreamOptions {
 	client?: Anthropic;
 }
 
-function mergeHeaders(...headerSources: (Record<string, string> | undefined)[]): Record<string, string> {
-	const merged: Record<string, string> = {};
+function mergeHeaders(...headerSources: (Record<string, string | null> | undefined)[]): Record<string, string | null> {
+	const merged: Record<string, string | null> = {};
 	for (const headers of headerSources) {
 		if (headers) {
 			Object.assign(merged, headers);
@@ -462,6 +470,9 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 					});
 				}
 
+				const cacheRetention = options?.cacheRetention ?? resolveCacheRetention();
+				const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
+
 				const created = createClient(
 					model,
 					apiKey,
@@ -469,6 +480,7 @@ export const streamAnthropic: StreamFunction<"anthropic-messages", AnthropicOpti
 					shouldUseFineGrainedToolStreamingBeta(model, context),
 					options?.headers,
 					copilotDynamicHeaders,
+					cacheSessionId,
 				);
 				client = created.client;
 				isOAuth = created.isOAuthToken;
@@ -693,23 +705,20 @@ function supportsAdaptiveThinking(modelId: string): boolean {
  * Map ThinkingLevel to Anthropic effort levels for adaptive thinking.
  * Note: effort "max" is only valid on Opus 4.6, while Opus 4.7 supports "xhigh".
  */
-function mapThinkingLevelToEffort(level: SimpleStreamOptions["reasoning"], modelId: string): AnthropicEffort {
+function mapThinkingLevelToEffort(
+	model: Model<"anthropic-messages">,
+	level: SimpleStreamOptions["reasoning"],
+): AnthropicEffort {
+	const mapped = level ? model.thinkingLevelMap?.[level] : undefined;
+	if (typeof mapped === "string") return mapped as AnthropicEffort;
+
 	switch (level) {
 		case "minimal":
-			return "low";
 		case "low":
 			return "low";
 		case "medium":
 			return "medium";
 		case "high":
-			return "high";
-		case "xhigh":
-			if (modelId.includes("opus-4-6") || modelId.includes("opus-4.6")) {
-				return "max";
-			}
-			if (modelId.includes("opus-4-7") || modelId.includes("opus-4.7")) {
-				return "xhigh";
-			}
 			return "high";
 		default:
 			return "high";
@@ -734,7 +743,7 @@ export const streamSimpleAnthropic: StreamFunction<"anthropic-messages", SimpleS
 	// For Opus 4.6 and Sonnet 4.6: use adaptive thinking with effort level
 	// For older models: use budget-based thinking
 	if (supportsAdaptiveThinking(model.id)) {
-		const effort = mapThinkingLevelToEffort(options.reasoning, model.id);
+		const effort = mapThinkingLevelToEffort(model, options.reasoning);
 		return streamAnthropic(model, context, {
 			...base,
 			thinkingEnabled: true,
@@ -742,8 +751,10 @@ export const streamSimpleAnthropic: StreamFunction<"anthropic-messages", SimpleS
 		} satisfies AnthropicOptions);
 	}
 
+	// Undefined means the caller did not request an output cap; let the helper use the model cap.
+	// Do not coerce to 0 here, or the thinking budget would become the entire max_tokens value.
 	const adjusted = adjustMaxTokensForThinking(
-		base.maxTokens || 0,
+		base.maxTokens,
 		model.maxTokens,
 		options.reasoning,
 		options.thinkingBudgets,
@@ -768,21 +779,44 @@ function createClient(
 	useFineGrainedToolStreamingBeta: boolean,
 	optionsHeaders?: Record<string, string>,
 	dynamicHeaders?: Record<string, string>,
+	sessionId?: string,
 ): { client: Anthropic; isOAuthToken: boolean } {
 	// Adaptive thinking models (Opus 4.6, Sonnet 4.6) have interleaved thinking built-in.
 	// The beta header is deprecated on Opus 4.6 and redundant on Sonnet 4.6, so skip it.
 	const needsInterleavedBeta = interleavedThinking && !supportsAdaptiveThinking(model.id);
+	const betaFeatures: string[] = [];
+	if (useFineGrainedToolStreamingBeta) {
+		betaFeatures.push(FINE_GRAINED_TOOL_STREAMING_BETA);
+	}
+	if (needsInterleavedBeta) {
+		betaFeatures.push(INTERLEAVED_THINKING_BETA);
+	}
+
+	if (model.provider === "cloudflare-ai-gateway") {
+		const client = new Anthropic({
+			apiKey: null,
+			authToken: null,
+			baseURL: resolveCloudflareBaseUrl(model),
+			dangerouslyAllowBrowser: true,
+			defaultHeaders: mergeHeaders(
+				{
+					accept: "application/json",
+					"anthropic-dangerous-direct-browser-access": "true",
+					"cf-aig-authorization": `Bearer ${apiKey}`,
+					"x-api-key": null,
+					Authorization: null,
+					...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
+				},
+				model.headers,
+				optionsHeaders,
+			),
+		});
+
+		return { client, isOAuthToken: false };
+	}
 
 	// Copilot: Bearer auth, selective betas.
 	if (model.provider === "github-copilot") {
-		const betaFeatures: string[] = [];
-		if (useFineGrainedToolStreamingBeta) {
-			betaFeatures.push(FINE_GRAINED_TOOL_STREAMING_BETA);
-		}
-		if (needsInterleavedBeta) {
-			betaFeatures.push(INTERLEAVED_THINKING_BETA);
-		}
-
 		const client = new Anthropic({
 			apiKey: null,
 			authToken: apiKey,
@@ -801,14 +835,6 @@ function createClient(
 		});
 
 		return { client, isOAuthToken: false };
-	}
-
-	const betaFeatures: string[] = [];
-	if (useFineGrainedToolStreamingBeta) {
-		betaFeatures.push(FINE_GRAINED_TOOL_STREAMING_BETA);
-	}
-	if (needsInterleavedBeta) {
-		betaFeatures.push(INTERLEAVED_THINKING_BETA);
 	}
 
 	// OAuth: Bearer auth, Claude Code identity headers
@@ -835,8 +861,11 @@ function createClient(
 	}
 
 	// API key auth
+	const sessionAffinityHeaders: Record<string, string | null> =
+		sessionId && getAnthropicCompat(model).sendSessionAffinityHeaders ? { "x-session-affinity": sessionId } : {};
 	const client = new Anthropic({
 		apiKey,
+		authToken: null,
 		baseURL: model.baseUrl,
 		dangerouslyAllowBrowser: true,
 		defaultHeaders: mergeHeaders(
@@ -845,6 +874,7 @@ function createClient(
 				"anthropic-dangerous-direct-browser-access": "true",
 				...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
 			},
+			sessionAffinityHeaders,
 			model.headers,
 			optionsHeaders,
 		),
@@ -863,7 +893,7 @@ function buildParams(
 	const params: MessageCreateParamsStreaming = {
 		model: model.id,
 		messages: convertMessages(context.messages, model, isOAuthToken, cacheControl),
-		max_tokens: options?.maxTokens || (model.maxTokens / 3) | 0,
+		max_tokens: options?.maxTokens ?? model.maxTokens,
 		stream: true,
 	};
 
@@ -900,11 +930,12 @@ function buildParams(
 	}
 
 	if (context.tools && context.tools.length > 0) {
+		const compat = getAnthropicCompat(model);
 		params.tools = convertTools(
 			context.tools,
 			isOAuthToken,
-			getAnthropicCompat(model).supportsEagerToolInputStreaming,
-			cacheControl,
+			compat.supportsEagerToolInputStreaming,
+			compat.supportsCacheControlOnTools ? cacheControl : undefined,
 		);
 	}
 

@@ -8,6 +8,7 @@ type StreamOptionsWithExtras = StreamOptions & Record<string, unknown>;
 
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.js";
 import { hasBedrockCredentials } from "./bedrock-utils.js";
+import { hasCloudflareAiGatewayCredentials, hasCloudflareWorkersAICredentials } from "./cloudflare-utils.js";
 import { resolveApiKey } from "./oauth.js";
 
 // Empty schema for test tools - must be proper OBJECT type for Cloud Code Assist
@@ -17,11 +18,9 @@ const emptySchema = Type.Object({});
 const oauthTokens = await Promise.all([
 	resolveApiKey("anthropic"),
 	resolveApiKey("github-copilot"),
-	resolveApiKey("google-gemini-cli"),
-	resolveApiKey("google-antigravity"),
 	resolveApiKey("openai-codex"),
 ]);
-const [anthropicOAuthToken, githubCopilotToken, geminiCliToken, antigravityToken, openaiCodexToken] = oauthTokens;
+const [anthropicOAuthToken, githubCopilotToken, openaiCodexToken] = oauthTokens;
 
 /**
  * Test for Unicode surrogate pair handling in tool results.
@@ -427,7 +426,7 @@ describe("AI Providers Unicode Surrogate Pair Tests", () => {
 			"claude-sonnet-4 - should handle emoji in tool results",
 			{ retry: 3, timeout: 30000 },
 			async () => {
-				const llm = getModel("github-copilot", "claude-sonnet-4");
+				const llm = getModel("github-copilot", "claude-sonnet-4.6");
 				await testEmojiInToolResults(llm, { apiKey: githubCopilotToken });
 			},
 		);
@@ -436,7 +435,7 @@ describe("AI Providers Unicode Surrogate Pair Tests", () => {
 			"claude-sonnet-4 - should handle real-world LinkedIn comment data with emoji",
 			{ retry: 3, timeout: 30000 },
 			async () => {
-				const llm = getModel("github-copilot", "claude-sonnet-4");
+				const llm = getModel("github-copilot", "claude-sonnet-4.6");
 				await testRealWorldLinkedInData(llm, { apiKey: githubCopilotToken });
 			},
 		);
@@ -445,120 +444,8 @@ describe("AI Providers Unicode Surrogate Pair Tests", () => {
 			"claude-sonnet-4 - should handle unpaired high surrogate (0xD83D) in tool results",
 			{ retry: 3, timeout: 30000 },
 			async () => {
-				const llm = getModel("github-copilot", "claude-sonnet-4");
+				const llm = getModel("github-copilot", "claude-sonnet-4.6");
 				await testUnpairedHighSurrogate(llm, { apiKey: githubCopilotToken });
-			},
-		);
-	});
-
-	describe("Google Gemini CLI Provider Unicode Handling", () => {
-		it.skipIf(!geminiCliToken)(
-			"gemini-2.5-flash - should handle emoji in tool results",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-gemini-cli", "gemini-2.5-flash");
-				await testEmojiInToolResults(llm, { apiKey: geminiCliToken });
-			},
-		);
-
-		it.skipIf(!geminiCliToken)(
-			"gemini-2.5-flash - should handle real-world LinkedIn comment data with emoji",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-gemini-cli", "gemini-2.5-flash");
-				await testRealWorldLinkedInData(llm, { apiKey: geminiCliToken });
-			},
-		);
-
-		it.skipIf(!geminiCliToken)(
-			"gemini-2.5-flash - should handle unpaired high surrogate (0xD83D) in tool results",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-gemini-cli", "gemini-2.5-flash");
-				await testUnpairedHighSurrogate(llm, { apiKey: geminiCliToken });
-			},
-		);
-	});
-
-	describe("Google Antigravity Provider Unicode Handling", () => {
-		it.skipIf(!antigravityToken)(
-			"gemini-3-flash - should handle emoji in tool results",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-antigravity", "gemini-3-flash");
-				await testEmojiInToolResults(llm, { apiKey: antigravityToken });
-			},
-		);
-
-		it.skipIf(!antigravityToken)(
-			"gemini-3-flash - should handle real-world LinkedIn comment data with emoji",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-antigravity", "gemini-3-flash");
-				await testRealWorldLinkedInData(llm, { apiKey: antigravityToken });
-			},
-		);
-
-		it.skipIf(!antigravityToken)(
-			"gemini-3-flash - should handle unpaired high surrogate (0xD83D) in tool results",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-antigravity", "gemini-3-flash");
-				await testUnpairedHighSurrogate(llm, { apiKey: antigravityToken });
-			},
-		);
-
-		it.skipIf(!antigravityToken)(
-			"claude-sonnet-4-5 - should handle emoji in tool results",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-antigravity", "claude-sonnet-4-5");
-				await testEmojiInToolResults(llm, { apiKey: antigravityToken });
-			},
-		);
-
-		it.skipIf(!antigravityToken)(
-			"claude-sonnet-4-5 - should handle real-world LinkedIn comment data with emoji",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-antigravity", "claude-sonnet-4-5");
-				await testRealWorldLinkedInData(llm, { apiKey: antigravityToken });
-			},
-		);
-
-		it.skipIf(!antigravityToken)(
-			"claude-sonnet-4-5 - should handle unpaired high surrogate (0xD83D) in tool results",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-antigravity", "claude-sonnet-4-5");
-				await testUnpairedHighSurrogate(llm, { apiKey: antigravityToken });
-			},
-		);
-
-		it.skipIf(!antigravityToken)(
-			"gpt-oss-120b-medium - should handle emoji in tool results",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-antigravity", "gpt-oss-120b-medium");
-				await testEmojiInToolResults(llm, { apiKey: antigravityToken });
-			},
-		);
-
-		it.skipIf(!antigravityToken)(
-			"gpt-oss-120b-medium - should handle real-world LinkedIn comment data with emoji",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-antigravity", "gpt-oss-120b-medium");
-				await testRealWorldLinkedInData(llm, { apiKey: antigravityToken });
-			},
-		);
-
-		it.skipIf(!antigravityToken)(
-			"gpt-oss-120b-medium - should handle unpaired high surrogate (0xD83D) in tool results",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("google-antigravity", "gpt-oss-120b-medium");
-				await testUnpairedHighSurrogate(llm, { apiKey: antigravityToken });
 			},
 		);
 	});
@@ -611,28 +498,37 @@ describe("AI Providers Unicode Surrogate Pair Tests", () => {
 		});
 	});
 
-	describe.skipIf(!process.env.CLOUDFLARE_API_KEY || !process.env.CLOUDFLARE_ACCOUNT_ID)(
-		"Cloudflare Workers AI Provider Unicode Handling",
-		() => {
-			const llm = getModel("cloudflare-workers-ai", "@cf/moonshotai/kimi-k2.6");
+	describe.skipIf(!hasCloudflareWorkersAICredentials())("Cloudflare Workers AI Provider Unicode Handling", () => {
+		const llm = getModel("cloudflare-workers-ai", "@cf/moonshotai/kimi-k2.6");
 
-			it("should handle emoji in tool results", { retry: 3, timeout: 30000 }, async () => {
-				await testEmojiInToolResults(llm);
-			});
+		it("should handle emoji in tool results", { retry: 3, timeout: 30000 }, async () => {
+			await testEmojiInToolResults(llm);
+		});
 
-			it("should handle real-world LinkedIn comment data with emoji", { retry: 3, timeout: 30000 }, async () => {
-				await testRealWorldLinkedInData(llm);
-			});
+		it("should handle real-world LinkedIn comment data with emoji", { retry: 3, timeout: 30000 }, async () => {
+			await testRealWorldLinkedInData(llm);
+		});
 
-			it(
-				"should handle unpaired high surrogate (0xD83D) in tool results",
-				{ retry: 3, timeout: 30000 },
-				async () => {
-					await testUnpairedHighSurrogate(llm);
-				},
-			);
-		},
-	);
+		it("should handle unpaired high surrogate (0xD83D) in tool results", { retry: 3, timeout: 30000 }, async () => {
+			await testUnpairedHighSurrogate(llm);
+		});
+	});
+
+	describe.skipIf(!hasCloudflareAiGatewayCredentials())("Cloudflare AI Gateway Provider Unicode Handling", () => {
+		const llm = getModel("cloudflare-ai-gateway", "workers-ai/@cf/moonshotai/kimi-k2.6");
+
+		it("should handle emoji in tool results", { retry: 3, timeout: 30000 }, async () => {
+			await testEmojiInToolResults(llm);
+		});
+
+		it("should handle real-world LinkedIn comment data with emoji", { retry: 3, timeout: 30000 }, async () => {
+			await testRealWorldLinkedInData(llm);
+		});
+
+		it("should handle unpaired high surrogate (0xD83D) in tool results", { retry: 3, timeout: 30000 }, async () => {
+			await testUnpairedHighSurrogate(llm);
+		});
+	});
 
 	describe.skipIf(!process.env.HF_TOKEN)("Hugging Face Provider Unicode Handling", () => {
 		const llm = getModel("huggingface", "moonshotai/Kimi-K2.5");
@@ -647,6 +543,23 @@ describe("AI Providers Unicode Surrogate Pair Tests", () => {
 
 		it("should handle unpaired high surrogate (0xD83D) in tool results", { retry: 3, timeout: 30000 }, async () => {
 			await testUnpairedHighSurrogate(llm);
+		});
+	});
+
+	describe.skipIf(!process.env.TOGETHER_API_KEY)("Together AI Provider Unicode Handling", () => {
+		const llm = getModel("together", "moonshotai/Kimi-K2.6");
+		const options = { reasoningEffort: "high" } satisfies StreamOptionsWithExtras;
+
+		it("should handle emoji in tool results", { retry: 3, timeout: 30000 }, async () => {
+			await testEmojiInToolResults(llm, options);
+		});
+
+		it("should handle real-world LinkedIn comment data with emoji", { retry: 3, timeout: 30000 }, async () => {
+			await testRealWorldLinkedInData(llm, options);
+		});
+
+		it("should handle unpaired high surrogate (0xD83D) in tool results", { retry: 3, timeout: 30000 }, async () => {
+			await testUnpairedHighSurrogate(llm, options);
 		});
 	});
 
@@ -698,6 +611,91 @@ describe("AI Providers Unicode Surrogate Pair Tests", () => {
 		});
 	});
 
+	describe.skipIf(!process.env.XIAOMI_API_KEY)("Xiaomi MiMo (API billing) Provider Unicode Handling", () => {
+		const llm = getModel("xiaomi", "mimo-v2.5-pro");
+
+		it("should handle emoji in tool results", { retry: 3, timeout: 30000 }, async () => {
+			await testEmojiInToolResults(llm);
+		});
+
+		it("should handle real-world LinkedIn comment data with emoji", { retry: 3, timeout: 30000 }, async () => {
+			await testRealWorldLinkedInData(llm);
+		});
+
+		it("should handle unpaired high surrogate (0xD83D) in tool results", { retry: 3, timeout: 30000 }, async () => {
+			await testUnpairedHighSurrogate(llm);
+		});
+	});
+
+	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_CN_API_KEY)(
+		"Xiaomi MiMo Token Plan (CN) Provider Unicode Handling",
+		() => {
+			const llm = getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro");
+
+			it("should handle emoji in tool results", { retry: 3, timeout: 30000 }, async () => {
+				await testEmojiInToolResults(llm);
+			});
+
+			it("should handle real-world LinkedIn comment data with emoji", { retry: 3, timeout: 30000 }, async () => {
+				await testRealWorldLinkedInData(llm);
+			});
+
+			it(
+				"should handle unpaired high surrogate (0xD83D) in tool results",
+				{ retry: 3, timeout: 30000 },
+				async () => {
+					await testUnpairedHighSurrogate(llm);
+				},
+			);
+		},
+	);
+
+	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_AMS_API_KEY)(
+		"Xiaomi MiMo Token Plan (AMS) Provider Unicode Handling",
+		() => {
+			const llm = getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro");
+
+			it("should handle emoji in tool results", { retry: 3, timeout: 30000 }, async () => {
+				await testEmojiInToolResults(llm);
+			});
+
+			it("should handle real-world LinkedIn comment data with emoji", { retry: 3, timeout: 30000 }, async () => {
+				await testRealWorldLinkedInData(llm);
+			});
+
+			it(
+				"should handle unpaired high surrogate (0xD83D) in tool results",
+				{ retry: 3, timeout: 30000 },
+				async () => {
+					await testUnpairedHighSurrogate(llm);
+				},
+			);
+		},
+	);
+
+	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_SGP_API_KEY)(
+		"Xiaomi MiMo Token Plan (SGP) Provider Unicode Handling",
+		() => {
+			const llm = getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro");
+
+			it("should handle emoji in tool results", { retry: 3, timeout: 30000 }, async () => {
+				await testEmojiInToolResults(llm);
+			});
+
+			it("should handle real-world LinkedIn comment data with emoji", { retry: 3, timeout: 30000 }, async () => {
+				await testRealWorldLinkedInData(llm);
+			});
+
+			it(
+				"should handle unpaired high surrogate (0xD83D) in tool results",
+				{ retry: 3, timeout: 30000 },
+				async () => {
+					await testUnpairedHighSurrogate(llm);
+				},
+			);
+		},
+	);
+
 	describe.skipIf(!process.env.KIMI_API_KEY)("Kimi For Coding Provider Unicode Handling", () => {
 		const llm = getModel("kimi-coding", "kimi-k2-thinking");
 
@@ -748,28 +746,28 @@ describe("AI Providers Unicode Surrogate Pair Tests", () => {
 
 	describe("OpenAI Codex Provider Unicode Handling", () => {
 		it.skipIf(!openaiCodexToken)(
-			"gpt-5.2-codex - should handle emoji in tool results",
+			"gpt-5.5 - should handle emoji in tool results",
 			{ retry: 3, timeout: 30000 },
 			async () => {
-				const llm = getModel("openai-codex", "gpt-5.2-codex");
+				const llm = getModel("openai-codex", "gpt-5.5");
 				await testEmojiInToolResults(llm, { apiKey: openaiCodexToken });
 			},
 		);
 
 		it.skipIf(!openaiCodexToken)(
-			"gpt-5.2-codex - should handle real-world LinkedIn comment data with emoji",
+			"gpt-5.5 - should handle real-world LinkedIn comment data with emoji",
 			{ retry: 3, timeout: 30000 },
 			async () => {
-				const llm = getModel("openai-codex", "gpt-5.2-codex");
+				const llm = getModel("openai-codex", "gpt-5.5");
 				await testRealWorldLinkedInData(llm, { apiKey: openaiCodexToken });
 			},
 		);
 
 		it.skipIf(!openaiCodexToken)(
-			"gpt-5.2-codex - should handle unpaired high surrogate (0xD83D) in tool results",
+			"gpt-5.5 - should handle unpaired high surrogate (0xD83D) in tool results",
 			{ retry: 3, timeout: 30000 },
 			async () => {
-				const llm = getModel("openai-codex", "gpt-5.2-codex");
+				const llm = getModel("openai-codex", "gpt-5.5");
 				await testUnpairedHighSurrogate(llm, { apiKey: openaiCodexToken });
 			},
 		);

@@ -4,11 +4,25 @@ Pi is a minimal terminal coding harness. It is designed to stay small at the cor
 
 ## Quick start
 
-Install pi with npm:
+On linux or mac you can install Pi with curl:
 
 ```bash
-npm install -g @mariozechner/pi-coding-agent
+curl -fsSL https://pi.dev/install.sh | sh
 ```
+
+Or alternatively with npm:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+```
+
+To uninstall pi itself, use npm for curl and npm installs:
+
+```bash
+npm uninstall -g @earendil-works/pi-coding-agent
+```
+
+For pnpm, Yarn, or Bun installs, use the matching global remove command: `pnpm remove -g @earendil-works/pi-coding-agent`, `yarn global remove @earendil-works/pi-coding-agent`, or `bun uninstall -g @earendil-works/pi-coding-agent`.
 
 Then run it in a project directory:
 

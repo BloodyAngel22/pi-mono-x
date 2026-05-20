@@ -13,7 +13,6 @@ for arg in "$@"; do
     --help|-h)
       echo "Usage: ./build.sh [--clean] [--no-web-ui]"
       echo "  --clean       Run 'npm run clean' in each package before building"
-      echo "  --no-web-ui   Skip building web-ui (faster, not needed for CLI)"
       exit 0 ;;
   esac
 done
@@ -48,14 +47,9 @@ build_pkg tui
 #build_pkg ai
 build_pkg agent
 build_pkg coding-agent
-build_pkg mom
-build_pkg pods
-
-if [ "$SKIP_WEB_UI" = false ]; then
-  build_pkg web-ui
-else
-  echo "  [skip]  web-ui (--no-web-ui)"
-fi
+#build_pkg mom
+#build_pkg pods
+#build_pkg web-ui
 
 echo "─────────────────────────────────────────"
 echo "Done in ${SECONDS}s. Run 'pi' to use the updated build."

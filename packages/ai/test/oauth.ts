@@ -53,7 +53,6 @@ function saveAuthStorage(storage: AuthStorage): void {
  * For API key credentials, returns the key directly.
  * For OAuth credentials, returns the access token (refreshing if expired and saving back).
  *
- * For google-gemini-cli and google-antigravity, returns JSON-encoded { token, projectId }
  */
 export async function resolveApiKey(provider: string): Promise<string | undefined> {
 	const storage = loadAuthStorage();
@@ -75,7 +74,12 @@ export async function resolveApiKey(provider: string): Promise<string | undefine
 			}
 		}
 
-		const result = await getOAuthApiKey(provider as OAuthProvider, oauthCredentials);
+		let result: { newCredentials: OAuthCredentials; apiKey: string } | null = null;
+		try {
+			result = await getOAuthApiKey(provider as OAuthProvider, oauthCredentials);
+		} catch (e) {
+			console.log(JSON.stringify(e));
+		}
 		if (!result) return undefined;
 
 		// Save refreshed credentials back to auth.json

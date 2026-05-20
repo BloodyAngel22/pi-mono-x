@@ -15,7 +15,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { completeSimple, type Message } from "@mariozechner/pi-ai";
+import { completeSimple, type Message } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "../../core/auth-guidance.js";
 import { fastContextSearch } from "../../core/context-search.js";

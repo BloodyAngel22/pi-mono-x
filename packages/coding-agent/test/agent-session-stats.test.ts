@@ -1,5 +1,5 @@
-import { Agent } from "@mariozechner/pi-agent-core";
-import { type AssistantMessage, getModel, type Usage } from "@mariozechner/pi-ai";
+import { Agent } from "@earendil-works/pi-agent-core";
+import { type AssistantMessage, getModel, type Usage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
@@ -136,6 +136,31 @@ describe("AgentSession.getSessionStats", () => {
 			expect(stats.contextUsage).toBeDefined();
 			expect(stats.contextUsage?.tokens).toBe(25_000);
 			expect(stats.contextUsage?.percent).toBe((25_000 / model.contextWindow) * 100);
+		} finally {
+			session.dispose();
+		}
+	});
+
+	it("updates context usage after compaction even when tokensAfter was recorded", () => {
+		const { session, sessionManager } = createSession();
+
+		try {
+			sessionManager.appendMessage(createUserMessage("first", 1));
+			sessionManager.appendMessage(createAssistantMessage("response1", 180_000, 2));
+			const keptUserId = sessionManager.appendMessage(createUserMessage("second", 3));
+			sessionManager.appendMessage(createAssistantMessage("response2", 195_000, 4));
+			sessionManager.appendCompaction("summary", keptUserId, 195_000, undefined, false, 20_000);
+			sessionManager.appendMessage(createUserMessage("third", 5));
+			syncAgentMessages(session, sessionManager);
+
+			expect(session.getContextUsage()?.tokens).toBe(20_000);
+
+			sessionManager.appendMessage(createAssistantMessage("response3", 32_000, 6));
+			syncAgentMessages(session, sessionManager);
+
+			const stats = session.getSessionStats();
+			expect(stats.contextUsage?.tokens).toBe(32_000);
+			expect(stats.contextUsage?.percent).toBe((32_000 / model.contextWindow) * 100);
 		} finally {
 			session.dispose();
 		}

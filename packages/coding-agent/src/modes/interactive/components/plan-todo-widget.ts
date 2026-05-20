@@ -1,4 +1,4 @@
-import { type Component, truncateToWidth } from "@mariozechner/pi-tui";
+import { type Component, truncateToWidth } from "@earendil-works/pi-tui";
 import type { PlanTask } from "../../../core/plan-mode.js";
 import type { Theme } from "../theme/theme.js";
 
