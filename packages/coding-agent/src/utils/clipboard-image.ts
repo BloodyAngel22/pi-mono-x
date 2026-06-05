@@ -1,10 +1,11 @@
 import { spawnSync } from "child_process";
 import { randomUUID } from "crypto";
-import { readFileSync, unlinkSync } from "fs";
+import { accessSync, readFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
 import { clipboard } from "./clipboard-native.js";
+import { detectSupportedImageMimeType } from "./mime.js";
 import { loadPhoton } from "./photon.js";
 
 export type ClipboardImage = {
@@ -251,6 +252,66 @@ async function readClipboardImageViaNativeClipboard(): Promise<ClipboardImage | 
 	return { bytes, mimeType: "image/png" };
 }
 
+/**
+ * Try to read clipboard content as a file URI pointing to an image.
+ *
+ * File managers (Nautilus, Dolphin, Thunar, etc.) typically put `text/uri-list`
+ * or `text/plain` with a `file://` path into the clipboard when the user copies
+ * a file, instead of the actual image data. This function reads that path,
+ * checks if it looks like an image file, and loads it directly.
+ */
+function readClipboardImageViaFilePath(env: NodeJS.ProcessEnv): ClipboardImage | null {
+	const wayland = isWaylandSession(env);
+	const imageExtRe = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+	// Read raw clipboard text (the file path)
+	let raw: { stdout: Buffer; ok: boolean } | null = null;
+	if (wayland) {
+		raw = runCommand("wl-paste", ["--no-newline"], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
+	} else {
+		raw = runCommand("xclip", ["-selection", "clipboard", "-o", "-t", "text/plain"], {
+			timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
+		});
+	}
+
+	if (!raw || !raw.ok || raw.stdout.length === 0) {
+		return null;
+	}
+
+	let filePath = raw.stdout.toString("utf-8").trim().split("\n")[0]?.trim() ?? "";
+	if (!filePath) {
+		return null;
+	}
+
+	// Decode file:// URI if present
+	if (filePath.startsWith("file://")) {
+		try {
+			filePath = decodeURIComponent(filePath.slice(7));
+		} catch {
+			return null;
+		}
+	}
+
+	// Must look like an image file
+	if (!imageExtRe.test(filePath)) {
+		return null;
+	}
+
+	// Read and detect the image
+	try {
+		accessSync(filePath);
+		const bytes = readFileSync(filePath);
+		const buf = new Uint8Array(bytes);
+		const mimeType = detectSupportedImageMimeType(buf);
+		if (!mimeType) {
+			return null;
+		}
+		return { bytes: buf, mimeType };
+	} catch {
+		return null;
+	}
+}
+
 export async function readClipboardImage(options?: {
 	env?: NodeJS.ProcessEnv;
 	platform?: NodeJS.Platform;
@@ -278,6 +339,11 @@ export async function readClipboardImage(options?: {
 
 		if (!image && !wayland) {
 			image = await readClipboardImageViaNativeClipboard();
+		}
+
+		// Fallback: file manager copies file path instead of image data
+		if (!image) {
+			image = readClipboardImageViaFilePath(env);
 		}
 	} else {
 		image = await readClipboardImageViaNativeClipboard();

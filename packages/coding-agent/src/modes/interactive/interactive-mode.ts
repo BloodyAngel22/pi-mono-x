@@ -3,7 +3,6 @@
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
  */
 
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -88,7 +87,7 @@ import { isInstallTelemetryEnabled } from "../../core/telemetry.js";
 import type { TruncationResult } from "../../core/tools/truncate.js";
 import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
-import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
+import { readClipboardImage } from "../../utils/clipboard-image.js";
 import { parseGitUrl } from "../../utils/git.js";
 import { getCwdRelativePath } from "../../utils/paths.js";
 import { getPiUserAgent } from "../../utils/pi-user-agent.js";
@@ -304,6 +303,11 @@ export class InteractiveMode {
 
 	// Track pending bash components (shown in pending area, moved to chat on submit)
 	private pendingBashComponents: BashExecutionComponent[] = [];
+
+	// Track pending image attachments from clipboard paste.
+	// Map key matches the N in `[Image N]` markers in the editor text.
+	private _pendingImageAttachments: Map<number, ImageContent> = new Map();
+	private _nextImageId = 1;
 
 	// Auto-compaction state
 	private autoCompactionLoader: Loader | undefined = undefined;
@@ -798,8 +802,11 @@ export class InteractiveMode {
 		// Main interactive loop
 		while (true) {
 			const userInput = await this.getUserInput();
+			const images = this._resolveImageMarkers(userInput);
 			try {
-				await this.session.prompt(userInput);
+				await this.session.prompt(userInput, {
+					images: images.length > 0 ? images : undefined,
+				});
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
@@ -2506,24 +2513,65 @@ export class InteractiveMode {
 
 	private async handleClipboardImagePaste(): Promise<void> {
 		try {
-			const image = await readClipboardImage();
-			if (!image) {
+			const clipImage = await readClipboardImage();
+			if (!clipImage) {
+				const wayland = !!process.env.WAYLAND_DISPLAY && !process.env.TERMUX_VERSION;
+				let hint: string;
+				if (wayland) {
+					const hasWlPaste = (process.env.PATH ?? "").split(":").some((dir) => {
+						try {
+							fs.accessSync(`${dir}/wl-paste`);
+							return true;
+						} catch {
+							return false;
+						}
+					});
+					hint = hasWlPaste
+						? "No image in clipboard — copy an image (e.g. screenshot) first, then paste"
+						: "Install wl-clipboard: sudo pacman -S wl-clipboard";
+				} else {
+					hint = "No image in clipboard";
+				}
+				this.showStatus(hint);
+				setTimeout(() => this.ui.requestRender(), 3000);
 				return;
 			}
 
-			// Write to temp file
-			const tmpDir = os.tmpdir();
-			const ext = extensionForImageMimeType(image.mimeType) ?? "png";
-			const fileName = `pi-clipboard-${crypto.randomUUID()}.${ext}`;
-			const filePath = path.join(tmpDir, fileName);
-			fs.writeFileSync(filePath, Buffer.from(image.bytes));
+			const id = this._nextImageId++;
+			const base64Data = Buffer.from(clipImage.bytes).toString("base64");
+			this._pendingImageAttachments.set(id, {
+				type: "image",
+				data: base64Data,
+				mimeType: clipImage.mimeType,
+			});
 
-			// Insert file path directly
-			this.editor.insertTextAtCursor?.(filePath);
+			this.editor.insertTextAtCursor?.(`[Image ${id}]`);
+			this.showStatus(`Image ${id} attached — add more by pasting again, remove by deleting the marker`);
 			this.ui.requestRender();
 		} catch {
 			// Silently ignore clipboard errors (may not have permission, etc.)
 		}
+	}
+
+	/**
+	 * Parse [Image N] markers from editor text and resolve them to ImageContent.
+	 * Unreferenced entries are cleaned from the map to prevent unbounded growth.
+	 */
+	private _resolveImageMarkers(text: string): ImageContent[] {
+		const markerRe = /\[Image (\d+)\]/g;
+		const found = new Set<number>();
+		const images: ImageContent[] = [];
+		for (const match of text.matchAll(markerRe)) {
+			const id = Number.parseInt(match[1]!, 10);
+			if (found.has(id)) continue;
+			found.add(id);
+			const img = this._pendingImageAttachments.get(id);
+			if (img) images.push(img);
+		}
+		for (const key of this._pendingImageAttachments.keys()) {
+			if (!found.has(key)) this._pendingImageAttachments.delete(key);
+		}
+		return images;
 	}
 
 	private setupEditorSubmitHandler(): void {

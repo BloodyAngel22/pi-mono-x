@@ -25,6 +25,8 @@ export {
 	serializeConversation,
 	shouldCompact,
 } from "./harness/compaction/compaction.js";
+// Harness
+export * from "./harness/images.js";
 export * from "./harness/messages.js";
 export * from "./harness/prompt-templates.js";
 export * from "./harness/session/jsonl-repo.js";
@@ -34,7 +36,6 @@ export * from "./harness/session/session.js";
 export { uuidv7 } from "./harness/session/uuid.js";
 export * from "./harness/skills.js";
 export * from "./harness/system-prompt.js";
-// Harness
 export * from "./harness/types.js";
 export * from "./harness/utils/shell-output.js";
 export * from "./harness/utils/truncate.js";

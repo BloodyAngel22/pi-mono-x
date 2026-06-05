@@ -12,8 +12,13 @@
 - Added top-level `name` support to `pi.registerProvider()` so extension-registered providers can show a friendly name in `/login` ([#3956](https://github.com/badlogic/pi-mono/issues/3956)).
 - Added `ctx.ui.getEditorComponent()` so extensions can wrap the currently configured custom editor factory ([#3935](https://github.com/badlogic/pi-mono/issues/3935)).
 
+### Added
+
+- Added `loadImageAttachment()` and `loadImageAttachments()` harness helpers to `@earendil-works/pi-agent-core`, converting image files into `ImageContent` blocks compatible with `session.prompt(text, { images })`.
+
 ### Fixed
 
+- Fixed clipboard image paste to track images as pending attachments that are sent with the next prompt instead of only inserting a bare file path.
 - Changed the default follow-up shortcut to unassigned and made Alt+Enter insert a newline by default, so terminals that send Shift+Enter as plain Enter still have a multi-line shortcut.
 - Fixed Shift+Enter to insert a newline before app-level keybindings such as follow-up submission handle it, including in Vim insert mode.
 - Fixed bash permission wildcard rules such as `rg *` to match invocations with flags before or after positional arguments, and generalized local, global, and session permission approvals to reusable bash rules instead of exact one-off commands.

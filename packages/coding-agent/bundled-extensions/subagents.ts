@@ -102,6 +102,8 @@ export default function (pi: ExtensionAPI): void {
 				getExtensions: () => ({ extensions: [], errors: [], runtime }),
 				getSkills: () => ({ skills: [] as any[], diagnostics: [] }),
 				getPrompts: () => ({ prompts: [] as any[], diagnostics: [] }),
+				getCommands: () => ({ commands: [] as any[] }),
+				getHooks: () => ({ hooks: [] as any[] }),
 				getThemes: () => ({ themes: [] as any[], diagnostics: [] }),
 				getAgentsFiles: () => ({ agentsFiles: [] }),
 				getSystemPrompt: () => opts.systemPrompt,

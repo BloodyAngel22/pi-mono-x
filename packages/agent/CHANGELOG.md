@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `loadImageAttachment()` and `loadImageAttachments()` harness helpers that convert image files on disk into `ImageContent` blocks with magic-byte MIME detection, ready to pass to `AgentHarness.prompt(text, { images })`.
+
 ### Fixed
 
 - Fixed tool-call preflight to stop preparing sibling tool calls after the run is aborted ([#4276](https://github.com/earendil-works/pi/issues/4276)).

@@ -161,8 +161,21 @@ describe("readClipboardImage", () => {
 	});
 
 	test("Non-Wayland: returns null when clipboard has no image", async () => {
-		mocks.spawnSync.mockImplementation(() => {
-			throw new Error("spawnSync should not be called for non-Wayland sessions");
+		// Image-specific methods fail (no image), file-path fallback also returns null
+		mocks.spawnSync.mockImplementation((cmd: string) => {
+			if (cmd === "xclip") {
+				const buf = Buffer.from("");
+				return {
+					status: 0,
+					stdout: buf,
+					stderr: buf,
+					error: undefined,
+					pid: 0,
+					output: [null, buf, buf],
+					signal: null,
+				};
+			}
+			throw new Error(`unexpected spawnSync: ${cmd}`);
 		});
 
 		mocks.clipboard.hasImage.mockReturnValue(false);
