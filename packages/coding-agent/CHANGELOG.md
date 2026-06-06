@@ -4,6 +4,10 @@
 
 ### Added
 
+- Added built-in `screenshot` tool: capture desktop screenshots (macOS/Linux/Windows) or web page screenshots via headless Chrome. Desktop mode uses OS-native utilities (`spectacle`, `gnome-screenshot`, `screencapture`, etc.) and requires a permission grant. Web mode accepts a URL and returns an `ImageContent` block for visual analysis by the model. Useful for UI analysis, e2e test generation, and game development feedback loops.
+
+- Added built-in `interact` tool: control the desktop by moving the mouse, clicking, typing, pressing keys, or scrolling. Supports xdotool (Linux/X11), ydotool (Linux/Wayland), cliclick (macOS), and PowerShell (Windows). All actions require a permission grant. When combined with `screenshot`, enables a visual feedback loop: screenshot → analyze → interact → screenshot → verify.
+
 - Added `--max-turns <n>` flag to limit the number of agent loop turns per prompt. Useful in CI/headless automation to prevent runaway sessions.
 - Added Markdown Commands: define slash commands as `.md` files with optional frontmatter `allowed-tools` and `model` overrides. Place files in `~/.pi/agent/commands/` (global) or `.pi/commands/` (project). Project commands override global ones with the same name.
 - Added File Checkpointing: before each `write` or `edit` tool call, pi snapshots file state in persistent session-scoped storage. Use `/tree` or `/rewind` to restore code to a selected session point, or `/checkpoint` to see what has been modified/created.

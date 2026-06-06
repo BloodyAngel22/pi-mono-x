@@ -540,6 +540,17 @@ export class AgentSession {
 			}
 			type = "file";
 			value = filePath;
+		} else if (toolName === "screenshot") {
+			// Desktop screenshots need permission (no URL = desktop mode)
+			// Web screenshots with a URL are always allowed
+			if (args?.url) return undefined;
+			type = "bash";
+			value = "screenshot:desktop";
+		} else if (toolName === "interact") {
+			// All interact actions control the desktop (mouse/keyboard)
+			// Always require permission regardless of action type
+			type = "bash";
+			value = `interact:${String(args?.action ?? "unknown")}`;
 		} else {
 			// MCP or other tools
 			// Built-in read-only tools and bundled interaction tools are always allowed
@@ -2706,7 +2717,7 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "bash", "edit", "write", "fast_context", "fast_fetch"];
+			: ["read", "bash", "edit", "write", "fast_context", "fast_fetch", "screenshot", "interact"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,

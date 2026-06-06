@@ -26,6 +26,7 @@ import {
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
+	createScreenshotTool,
 	createWriteTool,
 	type ToolName,
 	withFileMutationQueue,
@@ -116,6 +117,7 @@ export {
 	createReadTool,
 	createBashTool,
 	createEditTool,
+	createScreenshotTool,
 	createWriteTool,
 	createGrepTool,
 	createFindTool,
@@ -272,7 +274,16 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write", "fast_context", "fast_fetch"];
+	const defaultActiveToolNames: ToolName[] = [
+		"read",
+		"bash",
+		"edit",
+		"write",
+		"fast_context",
+		"fast_fetch",
+		"screenshot",
+		"interact",
+	];
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const initialActiveToolNames: string[] = options.tools
 		? [...options.tools]
