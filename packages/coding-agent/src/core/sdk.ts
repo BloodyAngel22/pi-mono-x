@@ -26,7 +26,8 @@ import {
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
-	createScreenshotTool,
+	createVirtualInteractTool,
+	createVirtualScreenshotTool,
 	createWriteTool,
 	type ToolName,
 	withFileMutationQueue,
@@ -117,7 +118,8 @@ export {
 	createReadTool,
 	createBashTool,
 	createEditTool,
-	createScreenshotTool,
+	createVirtualScreenshotTool,
+	createVirtualInteractTool,
 	createWriteTool,
 	createGrepTool,
 	createFindTool,
@@ -281,8 +283,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		"write",
 		"fast_context",
 		"fast_fetch",
-		"screenshot",
-		"interact",
+		"virtual_screenshot",
+		"virtual_interact",
 	];
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const initialActiveToolNames: string[] = options.tools

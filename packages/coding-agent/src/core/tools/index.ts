@@ -48,13 +48,6 @@ export {
 	type GrepToolOptions,
 } from "./grep.js";
 export {
-	createInteractTool,
-	createInteractToolDefinition,
-	type InteractToolDetails,
-	type InteractToolInput,
-	type InteractToolOptions,
-} from "./interact.js";
-export {
 	createLsTool,
 	createLsToolDefinition,
 	type LsOperations,
@@ -71,13 +64,6 @@ export {
 	type ReadToolOptions,
 } from "./read.js";
 export {
-	createScreenshotTool,
-	createScreenshotToolDefinition,
-	type ScreenshotToolDetails,
-	type ScreenshotToolInput,
-	type ScreenshotToolOptions,
-} from "./screenshot.js";
-export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
@@ -87,6 +73,20 @@ export {
 	truncateLine,
 	truncateTail,
 } from "./truncate.js";
+export {
+	createVirtualInteractTool,
+	createVirtualInteractToolDefinition,
+	type VirtualInteractToolDetails,
+	type VirtualInteractToolInput,
+	type VirtualInteractToolOptions,
+} from "./virtual-interact.js";
+export {
+	createVirtualScreenshotTool,
+	createVirtualScreenshotToolDefinition,
+	type VirtualScreenshotToolDetails,
+	type VirtualScreenshotToolInput,
+	type VirtualScreenshotToolOptions,
+} from "./virtual-screenshot.js";
 export {
 	createWriteTool,
 	createWriteToolDefinition,
@@ -103,10 +103,18 @@ import { createFastContextTool, createFastContextToolDefinition } from "./fast-c
 import { createFastFetchTool, createFastFetchToolDefinition, type FastFetchToolOptions } from "./fast-fetch.js";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.js";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.js";
-import { createInteractTool, createInteractToolDefinition, type InteractToolOptions } from "./interact.js";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.js";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.js";
-import { createScreenshotTool, createScreenshotToolDefinition, type ScreenshotToolOptions } from "./screenshot.js";
+import {
+	createVirtualInteractTool,
+	createVirtualInteractToolDefinition,
+	type VirtualInteractToolOptions,
+} from "./virtual-interact.js";
+import {
+	createVirtualScreenshotTool,
+	createVirtualScreenshotToolDefinition,
+	type VirtualScreenshotToolOptions,
+} from "./virtual-screenshot.js";
 import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } from "./write.js";
 
 export type Tool = AgentTool<any>;
@@ -121,8 +129,8 @@ export type ToolName =
 	| "ls"
 	| "fast_context"
 	| "fast_fetch"
-	| "screenshot"
-	| "interact";
+	| "virtual_screenshot"
+	| "virtual_interact";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -133,8 +141,8 @@ export const allToolNames: Set<ToolName> = new Set([
 	"ls",
 	"fast_context",
 	"fast_fetch",
-	"screenshot",
-	"interact",
+	"virtual_screenshot",
+	"virtual_interact",
 ]);
 
 export interface ToolsOptions {
@@ -146,8 +154,8 @@ export interface ToolsOptions {
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
 	fastFetch?: FastFetchToolOptions;
-	screenshot?: ScreenshotToolOptions;
-	interact?: InteractToolOptions;
+	virtualScreenshot?: VirtualScreenshotToolOptions;
+	virtualInteract?: VirtualInteractToolOptions;
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -170,10 +178,10 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createFastContextToolDefinition(cwd);
 		case "fast_fetch":
 			return createFastFetchToolDefinition(cwd, options?.fastFetch);
-		case "screenshot":
-			return createScreenshotToolDefinition(cwd, options?.screenshot);
-		case "interact":
-			return createInteractToolDefinition(cwd, options?.interact);
+		case "virtual_screenshot":
+			return createVirtualScreenshotToolDefinition(cwd, options?.virtualScreenshot);
+		case "virtual_interact":
+			return createVirtualInteractToolDefinition(cwd, options?.virtualInteract);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -199,10 +207,10 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createFastContextTool(cwd);
 		case "fast_fetch":
 			return createFastFetchTool(cwd, options?.fastFetch);
-		case "screenshot":
-			return createScreenshotTool(cwd, options?.screenshot);
-		case "interact":
-			return createInteractTool(cwd, options?.interact);
+		case "virtual_screenshot":
+			return createVirtualScreenshotTool(cwd, options?.virtualScreenshot);
+		case "virtual_interact":
+			return createVirtualInteractTool(cwd, options?.virtualInteract);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -214,8 +222,8 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 		createBashToolDefinition(cwd, options?.bash),
 		createEditToolDefinition(cwd, options?.edit),
 		createWriteToolDefinition(cwd, options?.write),
-		createScreenshotToolDefinition(cwd, options?.screenshot),
-		createInteractToolDefinition(cwd, options?.interact),
+		createVirtualScreenshotToolDefinition(cwd, options?.virtualScreenshot),
+		createVirtualInteractToolDefinition(cwd, options?.virtualInteract),
 	];
 }
 
@@ -241,8 +249,8 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		ls: createLsToolDefinition(cwd, options?.ls),
 		fast_context: createFastContextToolDefinition(cwd),
 		fast_fetch: createFastFetchToolDefinition(cwd, options?.fastFetch),
-		screenshot: createScreenshotToolDefinition(cwd, options?.screenshot),
-		interact: createInteractToolDefinition(cwd, options?.interact),
+		virtual_screenshot: createVirtualScreenshotToolDefinition(cwd, options?.virtualScreenshot),
+		virtual_interact: createVirtualInteractToolDefinition(cwd, options?.virtualInteract),
 	};
 }
 
@@ -252,8 +260,8 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 		createBashTool(cwd, options?.bash),
 		createEditTool(cwd, options?.edit),
 		createWriteTool(cwd, options?.write),
-		createScreenshotTool(cwd, options?.screenshot),
-		createInteractTool(cwd, options?.interact),
+		createVirtualScreenshotTool(cwd, options?.virtualScreenshot),
+		createVirtualInteractTool(cwd, options?.virtualInteract),
 	];
 }
 
@@ -279,7 +287,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		ls: createLsTool(cwd, options?.ls),
 		fast_context: createFastContextTool(cwd),
 		fast_fetch: createFastFetchTool(cwd, options?.fastFetch),
-		screenshot: createScreenshotTool(cwd, options?.screenshot),
-		interact: createInteractTool(cwd, options?.interact),
+		virtual_screenshot: createVirtualScreenshotTool(cwd, options?.virtualScreenshot),
+		virtual_interact: createVirtualInteractTool(cwd, options?.virtualInteract),
 	};
 }
