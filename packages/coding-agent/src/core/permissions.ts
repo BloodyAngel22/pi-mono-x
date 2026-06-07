@@ -76,6 +76,10 @@ export interface PermissionCheckInfo {
 	type: PolicyType;
 	/** The command text (bash), file path (file), or tool name (mcp) */
 	value: string;
+	/** The name of the tool requesting permission (e.g. "edit", "write", "bash", or MCP tool name) */
+	toolName?: string;
+	/** The full arguments object passed to the tool */
+	toolArgs?: Record<string, unknown>;
 }
 
 /** Callback used to prompt the user when policy is "ask". Returns null if no UI available. */

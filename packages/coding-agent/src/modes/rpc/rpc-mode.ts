@@ -362,7 +362,13 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			createDialogPromise(
 				undefined,
 				{ decision: "deny-once" as const },
-				{ method: "permission", permissionType: info.type, permissionValue: info.value },
+				{
+					method: "permission",
+					permissionType: info.type,
+					permissionValue: info.value,
+					permissionToolName: info.toolName,
+					permissionToolArgs: info.toolArgs,
+				},
 				(response) => {
 					if ("cancelled" in response && response.cancelled) return { decision: "deny-once" as const };
 					if ("decision" in response) {

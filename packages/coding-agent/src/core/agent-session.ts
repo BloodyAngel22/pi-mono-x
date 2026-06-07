@@ -565,7 +565,7 @@ export class AgentSession {
 		// policy === "ask" — prompt the user
 		if (!this.permissionAsk) return undefined; // no UI available, allow
 
-		const result = await this.permissionAsk({ type, value });
+		const result = await this.permissionAsk({ type, value, toolName, toolArgs: args });
 		if (!result) return undefined; // dismissed — allow
 
 		const { decision, scope } = result;

@@ -327,6 +327,8 @@ export type RpcExtensionUIRequest =
 			method: "permission";
 			permissionType: "bash" | "file" | "mcp";
 			permissionValue: string;
+			permissionToolName?: string;
+			permissionToolArgs?: unknown;
 	  }
 	| { type: "extension_ui_request"; id: string; method: "confirm"; title: string; message: string; timeout?: number }
 	| {
