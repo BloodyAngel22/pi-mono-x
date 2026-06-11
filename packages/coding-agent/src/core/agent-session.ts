@@ -543,7 +543,7 @@ export class AgentSession {
 		} else {
 			// MCP or other tools
 			// Built-in read-only tools and bundled interaction tools are always allowed
-			const alwaysAllowed = new Set(["read", "grep", "find", "ls", "ask_user"]);
+			const alwaysAllowed = new Set(["read", "grep", "find", "ls", "ask_user", "analyze_image"]);
 			if (alwaysAllowed.has(toolName)) return undefined;
 			type = "mcp";
 			value = toolName;

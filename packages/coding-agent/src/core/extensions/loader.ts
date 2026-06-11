@@ -19,6 +19,7 @@ import * as _bundledMcpSdkStdio from "@modelcontextprotocol/sdk/client/stdio.js"
 import * as _bundledMcpSdkHttp from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import * as _bundledMcpSdkTypes from "@modelcontextprotocol/sdk/types.js";
 import { createJiti } from "jiti";
+import * as _bundledTesseractJs from "tesseract.js";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
 // The virtualModules option then makes them available to extensions.
@@ -58,6 +59,7 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@sinclair/typebox": _bundledTypebox,
 	"@sinclair/typebox/compile": _bundledTypeboxCompile,
 	"@sinclair/typebox/value": _bundledTypeboxValue,
+	"tesseract.js": _bundledTesseractJs,
 	"@earendil-works/pi-agent-core": _bundledPiAgentCore,
 	"@earendil-works/pi-tui": _bundledPiTui,
 	"@earendil-works/pi-ai": _bundledPiAi,
