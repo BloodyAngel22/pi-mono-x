@@ -70,6 +70,7 @@ interface IndexedFile {
 	mtimeMs: number;
 	size: number;
 	language: string;
+	bodyText: string;
 	symbols: IndexedSymbol[];
 	imports: ImportEdge[];
 }
@@ -78,9 +79,22 @@ interface ProjectStructureIndex {
 	cwd: string;
 	builtAt: number;
 	files: Map<string, IndexedFile>;
+	mtimes: Map<string, number>;
 	symbols: IndexedSymbol[];
 	imports: ImportEdge[];
 	reverseImports: Map<string, string[]>;
+	bm25Stats: Bm25CorpusStats;
+}
+
+interface Bm25Field {
+	text: string;
+	weight: number;
+}
+
+interface Bm25CorpusStats {
+	documentCount: number;
+	documentFrequency: Map<string, number>;
+	averageFieldLength: number;
 }
 
 const DEFAULT_MAX_FILES = 12;
@@ -88,8 +102,10 @@ const DEFAULT_MAX_MATCHES = 200;
 const DEFAULT_CONTEXT_LINES = 3;
 const MAX_SNIPPET_RANGES = 3;
 const MAX_SNIPPET_CHARS = 1200;
-const STRUCTURE_INDEX_TTL_MS = 60_000;
+const MAX_INDEXED_BODY_CHARS = 64_000;
 const STRUCTURE_FILE_LIMIT = 5000;
+const BM25_K1 = 1.2;
+const BM25_B = 0.75;
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py"]);
 const TEXT_EXTENSIONS = new Set([
 	".ts",
@@ -153,12 +169,28 @@ const QUERY_EXPANSIONS: Record<string, string[]> = {
 	чат: ["chat", "message"],
 	модель: ["model", "provider"],
 	модели: ["models", "provider"],
-	authorization: ["auth", "login", "session"],
-	auth: ["authorization", "login", "session"],
+	authorization: ["auth", "authentication", "login", "session"],
+	authentication: ["auth", "authorization", "login"],
+	auth: ["authorization", "authentication", "login", "session"],
 	button: ["btn"],
+	btn: ["button"],
+	configuration: ["config", "settings"],
+	config: ["configuration", "settings"],
+	ctx: ["context", "contextUsage", "contextWindow"],
+	context: ["ctx", "contextUsage", "contextWindow"],
+	initialize: ["init", "setup"],
+	init: ["initialize", "setup"],
+	implementation: ["impl"],
+	impl: ["implementation"],
+	message: ["msg", "prompt"],
+	msg: ["message", "prompt"],
+	synchronization: ["sync"],
+	sync: ["synchronization"],
+	utility: ["util", "utils"],
+	util: ["utility", "utils"],
+	utils: ["utility", "util"],
 	send: ["submit", "sendPrompt"],
 	submit: ["send", "sendPrompt"],
-	context: ["contextUsage", "contextWindow"],
 	session: ["sessionState", "sessionStats"],
 };
 
@@ -176,6 +208,19 @@ function addTerm(terms: Set<string>, term: string): void {
 	if (expansions) for (const expansion of expansions) terms.add(expansion);
 }
 
+function expandCamelCase(term: string): string[] {
+	return term
+		.replace(/[_-]+/g, " ")
+		.split(/\s+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/)
+		.map((part) => part.trim())
+		.filter((part) => part.length >= 3 && part.toLowerCase() !== term.toLowerCase());
+}
+
+function addTermWithSubterms(terms: Set<string>, term: string): void {
+	addTerm(terms, term);
+	for (const part of expandCamelCase(term)) addTerm(terms, part);
+}
+
 function extractTerms(query: string): string[] {
 	const terms = new Set<string>();
 	const cleaned = query
@@ -187,13 +232,16 @@ function extractTerms(query: string): string[] {
 		if (word.length < 3) continue;
 		if (/^(the|and|for|with|from|this|that|как|где|что|это|для|или|при|над|под|надо|нужно|можно)$/i.test(word))
 			continue;
-		addTerm(terms, word);
+		addTermWithSubterms(terms, word);
 	}
 	for (const match of query.matchAll(/[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*/g)) {
 		const value = match[0];
-		if (value.length >= 3) addTerm(terms, value);
+		if (value.length >= 3) {
+			addTermWithSubterms(terms, value);
+			for (const part of value.split(".")) addTermWithSubterms(terms, part);
+		}
 	}
-	return [...terms].slice(0, 24);
+	return [...terms].slice(0, 36);
 }
 
 function pathScore(relativePath: string): number {
@@ -219,6 +267,70 @@ function fileNameBoost(relativePath: string, terms: string[]): number {
 		const t = term.toLowerCase();
 		if (base === t || base === `${t}.ts` || base === `${t}.tsx`) score += 20;
 		else if (base.includes(t)) score += 8;
+	}
+	return score;
+}
+
+function tokenizeSearchText(text: string): string[] {
+	return text
+		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+		.replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+		.toLowerCase()
+		.split(/[^\p{L}\p{N}_$]+/u)
+		.map((token) => token.trim())
+		.filter((token) => token.length >= 2);
+}
+
+function bm25FieldsForFile(file: IndexedFile): Bm25Field[] {
+	return [
+		{ text: file.path, weight: 3 },
+		{ text: file.symbols.map((symbol) => `${symbol.name} ${symbol.signature ?? ""}`).join("\n"), weight: 2 },
+		{ text: file.imports.map((edge) => `${edge.rawSpecifier} ${edge.to ?? ""}`).join("\n"), weight: 1.5 },
+		{ text: file.bodyText, weight: 1 },
+	];
+}
+
+function buildBm25CorpusStats(files: Iterable<IndexedFile>): Bm25CorpusStats {
+	const documentFrequency = new Map<string, number>();
+	let documentCount = 0;
+	let totalFieldLength = 0;
+	let fieldCount = 0;
+	for (const file of files) {
+		documentCount++;
+		const seenInDocument = new Set<string>();
+		for (const field of bm25FieldsForFile(file)) {
+			const tokens = tokenizeSearchText(field.text);
+			totalFieldLength += tokens.length;
+			fieldCount++;
+			for (const token of tokens) seenInDocument.add(token);
+		}
+		for (const token of seenInDocument) documentFrequency.set(token, (documentFrequency.get(token) ?? 0) + 1);
+	}
+	return {
+		documentCount,
+		documentFrequency,
+		averageFieldLength: fieldCount > 0 ? Math.max(1, totalFieldLength / fieldCount) : 1,
+	};
+}
+
+function bm25fScore(file: IndexedFile, queryTerms: string[], stats: Bm25CorpusStats): number {
+	if (stats.documentCount <= 0 || queryTerms.length === 0) return 0;
+	const normalizedTerms = [...new Set(queryTerms.flatMap((term) => tokenizeSearchText(term)))];
+	if (!normalizedTerms.length) return 0;
+	let score = 0;
+	for (const field of bm25FieldsForFile(file)) {
+		const tokens = tokenizeSearchText(field.text);
+		if (!tokens.length) continue;
+		const counts = new Map<string, number>();
+		for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
+		const lengthNorm = 1 - BM25_B + BM25_B * (tokens.length / stats.averageFieldLength);
+		for (const term of normalizedTerms) {
+			const tf = counts.get(term) ?? 0;
+			if (tf <= 0) continue;
+			const df = stats.documentFrequency.get(term) ?? 0;
+			const idf = Math.max(0.01, Math.log(1 + (stats.documentCount - df + 0.5) / (df + 0.5)));
+			score += field.weight * idf * ((tf * (BM25_K1 + 1)) / (tf + BM25_K1 * lengthNorm));
+		}
 	}
 	return score;
 }
@@ -513,48 +625,98 @@ async function listSourceFiles(cwd: string, signal?: AbortSignal): Promise<strin
 	});
 }
 
+function rebuildDerivedIndex(index: ProjectStructureIndex): void {
+	index.symbols = [];
+	index.imports = [];
+	index.reverseImports = new Map<string, string[]>();
+	for (const file of index.files.values()) {
+		index.symbols.push(...file.symbols);
+		index.imports.push(...file.imports);
+	}
+	for (const edge of index.imports) {
+		if (!edge.to || !index.files.has(edge.to)) continue;
+		const arr = index.reverseImports.get(edge.to) ?? [];
+		arr.push(edge.from);
+		index.reverseImports.set(edge.to, arr);
+	}
+	index.bm25Stats = buildBm25CorpusStats(index.files.values());
+}
+
+function indexSourceFile(cwd: string, abs: string, fileSet: Set<string>): IndexedFile | undefined {
+	try {
+		const st = statSync(abs);
+		if (!st.isFile() || st.size > 512_000) return undefined;
+		const rel = relativeToCwd(cwd, abs);
+		const language = languageForPath(rel);
+		const content = readFileSync(abs, "utf8");
+		return {
+			path: rel,
+			abs,
+			mtimeMs: st.mtimeMs,
+			size: st.size,
+			language,
+			bodyText: content.slice(0, MAX_INDEXED_BODY_CHARS),
+			symbols: extractSymbols(rel, content, language),
+			imports: extractImports(rel, content, language, fileSet),
+		};
+	} catch {
+		return undefined;
+	}
+}
+
 async function getStructureIndex(cwd: string, signal?: AbortSignal): Promise<ProjectStructureIndex> {
 	const cached = structureIndexCache.get(cwd);
-	if (cached && Date.now() - cached.builtAt < STRUCTURE_INDEX_TTL_MS) return cached;
 	const absFiles = await listSourceFiles(cwd, signal).catch(() => []);
 	const relFiles = absFiles.map((f) => relativeToCwd(cwd, f));
 	const fileSet = new Set(relFiles);
-	const files = new Map<string, IndexedFile>();
-	const allSymbols: IndexedSymbol[] = [];
-	const allImports: ImportEdge[] = [];
-	for (const abs of absFiles) {
-		try {
-			const st = statSync(abs);
-			if (!st.isFile() || st.size > 512_000) continue;
-			const rel = relativeToCwd(cwd, abs);
-			const language = languageForPath(rel);
-			const content = readFileSync(abs, "utf8");
-			const symbols = extractSymbols(rel, content, language);
-			const imports = extractImports(rel, content, language, fileSet);
-			const indexed: IndexedFile = {
-				path: rel,
-				abs,
-				mtimeMs: st.mtimeMs,
-				size: st.size,
-				language,
-				symbols,
-				imports,
-			};
-			files.set(rel, indexed);
-			allSymbols.push(...symbols);
-			allImports.push(...imports);
-		} catch {
-			// ignore unreadable files
+	const currentRelSet = new Set(relFiles);
+	const mustReindexAll =
+		!cached || relFiles.length !== cached.files.size || relFiles.some((rel) => !cached.files.has(rel));
+	const index: ProjectStructureIndex = cached ?? {
+		cwd,
+		builtAt: 0,
+		files: new Map<string, IndexedFile>(),
+		mtimes: new Map<string, number>(),
+		symbols: [],
+		imports: [],
+		reverseImports: new Map<string, string[]>(),
+		bm25Stats: buildBm25CorpusStats([]),
+	};
+
+	let changed = !cached;
+	for (const rel of [...index.files.keys()]) {
+		if (!currentRelSet.has(rel)) {
+			index.files.delete(rel);
+			index.mtimes.delete(rel);
+			changed = true;
 		}
 	}
-	const reverseImports = new Map<string, string[]>();
-	for (const edge of allImports) {
-		if (!edge.to) continue;
-		const arr = reverseImports.get(edge.to) ?? [];
-		arr.push(edge.from);
-		reverseImports.set(edge.to, arr);
+
+	for (const abs of absFiles) {
+		const rel = relativeToCwd(cwd, abs);
+		let mtimeMs: number | undefined;
+		try {
+			const st = statSync(abs);
+			if (!st.isFile()) continue;
+			mtimeMs = st.mtimeMs;
+		} catch {
+			continue;
+		}
+		const cachedMtime = index.mtimes.get(rel);
+		if (!mustReindexAll && cachedMtime === mtimeMs && index.files.has(rel)) continue;
+		const indexed = indexSourceFile(cwd, abs, fileSet);
+		if (indexed) {
+			index.files.set(rel, indexed);
+			index.mtimes.set(rel, indexed.mtimeMs);
+		} else {
+			index.files.delete(rel);
+			index.mtimes.delete(rel);
+		}
+		changed = true;
 	}
-	const index = { cwd, builtAt: Date.now(), files, symbols: allSymbols, imports: allImports, reverseImports };
+
+	if (changed) rebuildDerivedIndex(index);
+	index.builtAt = Date.now();
 	structureIndexCache.set(cwd, index);
 	return index;
 }
@@ -722,6 +884,7 @@ export async function fastContextSearch(
 		runFd(cwd, terms, maxFiles * 4, signal).catch(() => []),
 		getStructureIndex(cwd, signal).catch(() => undefined),
 	]);
+	const bm25Stats = structure?.bm25Stats;
 
 	const files = new Map<
 		string,
@@ -741,17 +904,34 @@ export async function fastContextSearch(
 		item.score += score + pathScore(rel) + fileNameBoost(rel, terms);
 		item.terms.add(reason);
 		if (range) item.ranges = mergeRange(item.ranges, range);
+		scoreCache.delete(abs);
+	};
+	const scoreCache = new Map<string, number>();
+	const scoreItem = (item: { abs: string; score: number }): number => {
+		const cachedScore = scoreCache.get(item.abs);
+		if (cachedScore !== undefined) return cachedScore;
+		const rel = relativeToCwd(cwd, item.abs);
+		const indexed = structure?.files.get(rel);
+		const bm25Score = indexed && bm25Stats ? bm25fScore(indexed, terms.length ? terms : [normalized], bm25Stats) : 0;
+		const score = item.score + bm25Score * 10 + pathScore(rel) + fileNameBoost(rel, terms);
+		scoreCache.set(item.abs, score);
+		return score;
 	};
 
+	const rgMatchCounts = new Map<string, number>();
 	for (const match of matches) {
 		const item = ensure(match.file);
-		item.score += 10;
+		const previousMatches = rgMatchCounts.get(match.file) ?? 0;
+		rgMatchCounts.set(match.file, previousMatches + 1);
+		// Repeated lexical matches in one file are useful, but should not let noisy comments/logs outrank
+		// exact path/symbol hits. Give the first hit a strong signal, then quickly saturate.
+		item.score += previousMatches === 0 ? 10 : previousMatches < 4 ? 2 : 0;
 		item.terms.add(match.term);
 		item.ranges = mergeRange(item.ranges, {
 			start: Math.max(1, match.line - contextLines),
 			end: match.line + contextLines,
 		});
-		if (TEXT_EXTENSIONS.has(path.extname(match.file).toLowerCase())) item.score += 1;
+		if (previousMatches === 0 && TEXT_EXTENSIONS.has(path.extname(match.file).toLowerCase())) item.score += 1;
 	}
 
 	for (const hit of pathHits) {
@@ -787,7 +967,7 @@ export async function fastContextSearch(
 		}
 
 		const seeded = [...files.values()]
-			.sort((a, b) => b.score - a.score)
+			.sort((a, b) => scoreItem(b) - scoreItem(a))
 			.slice(0, Math.min(maxFiles, 8))
 			.map((item) => relativeToCwd(cwd, item.abs));
 		for (const rel of seeded) {
@@ -805,9 +985,7 @@ export async function fastContextSearch(
 		.sort((a, b) => {
 			const aRel = relativeToCwd(cwd, a.abs);
 			const bRel = relativeToCwd(cwd, b.abs);
-			const aScore = a.score + pathScore(aRel) + fileNameBoost(aRel, terms);
-			const bScore = b.score + pathScore(bRel) + fileNameBoost(bRel, terms);
-			return bScore - aScore || aRel.localeCompare(bRel);
+			return scoreItem(b) - scoreItem(a) || aRel.localeCompare(bRel);
 		})
 		.slice(0, maxFiles)
 		.map((item) => {
@@ -819,11 +997,7 @@ export async function fastContextSearch(
 				snippets: options.includeSnippets
 					? snippetRanges.map((r) => ({ ...r, snippet: readSnippet(item.abs, r.start, r.end) }))
 					: undefined,
-				score: Math.round(
-					item.score +
-						pathScore(relativeToCwd(cwd, item.abs)) +
-						fileNameBoost(relativeToCwd(cwd, item.abs), terms),
-				),
+				score: Math.round(scoreItem(item)),
 				reason: item.terms.size ? `matched: ${[...item.terms].slice(0, 5).join(", ")}` : "path match",
 			};
 		});
