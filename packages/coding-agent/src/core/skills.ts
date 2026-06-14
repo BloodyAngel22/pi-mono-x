@@ -68,6 +68,10 @@ function addIgnoreRules(ig: IgnoreMatcher, dir: string, rootDir: string): void {
 export interface SkillFrontmatter {
 	name?: string;
 	description?: string;
+	/** Optional categories used for grouping and relevance matching. */
+	categories?: string[] | string;
+	/** Backward-compatible singular category alias. */
+	category?: string[] | string;
 	"disable-model-invocation"?: boolean;
 	[key: string]: unknown;
 }
@@ -75,6 +79,8 @@ export interface SkillFrontmatter {
 export interface Skill {
 	name: string;
 	description: string;
+	/** Optional categories used for grouping and relevance matching. */
+	categories: string[];
 	filePath: string;
 	baseDir: string;
 	sourceInfo: SourceInfo;
@@ -125,6 +131,15 @@ function validateDescription(description: string | undefined): string[] {
 	}
 
 	return errors;
+}
+
+function normalizeCategories(value: unknown): string[] {
+	const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+	const categories = raw
+		.map((item) => String(item).trim().toLowerCase())
+		.map((item) => item.replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, ""))
+		.filter(Boolean);
+	return Array.from(new Set(categories));
 }
 
 export interface LoadSkillsFromDirOptions {
@@ -311,6 +326,7 @@ function loadSkillFromFile(
 			skill: {
 				name,
 				description: frontmatter.description,
+				categories: normalizeCategories(frontmatter.categories ?? frontmatter.category),
 				filePath,
 				baseDir: skillDir,
 				sourceInfo: createSkillSourceInfo(filePath, skillDir, source),
@@ -342,23 +358,167 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 
 	const lines = [
 		"\n\nThe following skills provide specialized instructions for specific tasks.",
-		"Use the read tool to load a skill's file when the task matches its description.",
+		"CRITICAL: Before starting any work, review the available skills below and decide whether one or more skills applies to the user's task.",
+		"If a skill matches the task, use the read tool to load its SKILL.md from <location> before proceeding, then follow its instructions carefully.",
+		"If multiple skills apply, use all of them in a sensible order. Do not ignore a relevant skill just because it was only listed by name/description.",
 		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
+		"",
+		"Common task-to-skill mappings:",
+		"- Research, browser automation, web search, screenshots → browser-act",
+		"- Document generation or parsing → docx, pdf",
+		"- Bug fixing, failures, flaky behavior → systematic-debugging",
+		"- Creative work, new features, UX/UI design → brainstorming, frontend-design, impeccable",
+		"- Code implementation, refactoring, multi-step coding → writing-plans, code-implementer, subagent-driven-development",
+		"- Testing → test-driven-development",
+		"- Architecture decisions → architect-master, flutter-architecture",
+		"- Code review → requesting-code-review",
+		"- Security → security-audit",
+		"- Flutter work → flutter-analyze, flutter-architecture, flutter-auto-route, flutter-project-setup, flutter-theme",
+		"- Prompt engineering → prompt-master",
+		"- Creating or improving skills → skill-creator, skill-analyzer, find-skills",
 		"",
 		"<available_skills>",
 	];
 
+	const grouped = new Map<string, Skill[]>();
 	for (const skill of visibleSkills) {
-		lines.push("  <skill>");
-		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-		lines.push(`    <description>${escapeXml(skill.description)}</description>`);
-		lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
-		lines.push("  </skill>");
+		const categories = skill.categories.length > 0 ? skill.categories : ["uncategorized"];
+		for (const category of categories) {
+			const bucket = grouped.get(category) ?? [];
+			bucket.push(skill);
+			grouped.set(category, bucket);
+		}
+	}
+
+	for (const [category, categorySkills] of [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+		lines.push(`  <category name="${escapeXml(category)}">`);
+		for (const skill of categorySkills.sort((a, b) => a.name.localeCompare(b.name))) {
+			lines.push("    <skill>");
+			lines.push(`      <name>${escapeXml(skill.name)}</name>`);
+			lines.push(`      <description>${escapeXml(skill.description)}</description>`);
+			if (skill.categories.length > 0) {
+				lines.push(`      <categories>${escapeXml(skill.categories.join(", "))}</categories>`);
+			}
+			lines.push(`      <location>${escapeXml(skill.filePath)}</location>`);
+			lines.push("    </skill>");
+		}
+		lines.push("  </category>");
 	}
 
 	lines.push("</available_skills>");
 
 	return lines.join("\n");
+}
+
+export interface ScoredSkill {
+	skill: Skill;
+	score: number;
+	reasons: string[];
+}
+
+const STOP_WORDS = new Set([
+	"the",
+	"and",
+	"for",
+	"with",
+	"that",
+	"this",
+	"from",
+	"into",
+	"как",
+	"что",
+	"это",
+	"для",
+	"или",
+	"при",
+	"надо",
+	"нужно",
+	"сделать",
+	"реализовать",
+]);
+
+function tokenizeForSkillMatch(text: string): string[] {
+	return Array.from(
+		new Set(
+			text
+				.toLowerCase()
+				.split(/[^\p{L}\p{N}-]+/u)
+				.map((token) => token.trim())
+				.filter((token) => token.length >= 3 && !STOP_WORDS.has(token)),
+		),
+	);
+}
+
+function inferPromptCategories(prompt: string): string[] {
+	const text = prompt.toLowerCase();
+	const categories: string[] = [];
+	const add = (category: string, patterns: RegExp[]) => {
+		if (patterns.some((pattern) => pattern.test(text))) categories.push(category);
+	};
+	add("flutter", [/\bflutter\b/, /\bdart\b/, /widget/, /theme/, /auto[- ]?route/]);
+	add("document", [/\bpdf\b/, /\bdocx\b/, /document/, /документ/]);
+	add("debugging", [/bug/, /debug/, /fix/, /error/, /fail/, /ошиб/, /баг/, /почин/]);
+	add("testing", [/test/, /spec/, /tdd/, /тест/]);
+	add("architecture", [/architect/, /design/, /структур/, /архитект/]);
+	add("security", [/security/, /audit/, /vulnerab/, /безопас/]);
+	add("research", [/research/, /browser/, /web/, /search/, /исслед/, /поиск/]);
+	add("creative", [/ui|ux/, /feature/, /brainstorm/, /design/, /иде[яи]/]);
+	add("planning", [/plan/, /roadmap/, /task/, /todo/, /план/]);
+	add("meta", [/skill/, /скилл/]);
+	return Array.from(new Set(categories));
+}
+
+export function scoreSkillsByRelevance(
+	prompt: string,
+	skills: Skill[],
+	options?: { minScore?: number; limit?: number },
+): ScoredSkill[] {
+	const promptTokens = tokenizeForSkillMatch(prompt);
+	const promptTokenSet = new Set(promptTokens);
+	const promptLower = prompt.toLowerCase();
+	const inferredCategories = inferPromptCategories(prompt);
+	const inferredCategorySet = new Set(inferredCategories);
+	const mentionsSkill = /\bskills?\b|скилл/i.test(prompt);
+	const minScore = options?.minScore ?? 0.1;
+	const limit = options?.limit ?? 5;
+
+	const scored = skills.map((skill): ScoredSkill => {
+		const reasons: string[] = [];
+		let score = 0;
+		const nameText = skill.name.toLowerCase();
+		const searchable = `${skill.name} ${skill.description} ${skill.categories.join(" ")}`.toLowerCase();
+		const searchableTokens = new Set(tokenizeForSkillMatch(searchable));
+
+		if (promptLower.includes(nameText)) {
+			score += 0.4;
+			reasons.push("name");
+		}
+
+		const overlap = promptTokens.filter((token) => searchableTokens.has(token));
+		if (overlap.length > 0) {
+			const overlapScore = Math.min(0.3, (overlap.length / Math.max(4, promptTokenSet.size)) * 0.3);
+			score += overlapScore;
+			reasons.push(`keywords:${overlap.slice(0, 5).join(",")}`);
+		}
+
+		const categoryOverlap = skill.categories.filter((category) => inferredCategorySet.has(category));
+		if (categoryOverlap.length > 0) {
+			score += Math.min(0.2, categoryOverlap.length * 0.1);
+			reasons.push(`categories:${categoryOverlap.join(",")}`);
+		}
+
+		if (mentionsSkill && (promptLower.includes(nameText) || skill.categories.some((c) => promptLower.includes(c)))) {
+			score += 0.1;
+			reasons.push("explicit-skill-context");
+		}
+
+		return { skill, score: Math.min(1, Number(score.toFixed(3))), reasons };
+	});
+
+	return scored
+		.filter((item) => item.score >= minScore)
+		.sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name))
+		.slice(0, limit);
 }
 
 function escapeXml(str: string): string {

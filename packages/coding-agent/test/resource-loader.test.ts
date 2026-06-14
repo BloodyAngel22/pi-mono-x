@@ -457,6 +457,7 @@ Content`,
 			const injectedSkill: Skill = {
 				name: "injected",
 				description: "Injected skill",
+				categories: [],
 				filePath: "/fake/path",
 				baseDir: "/fake",
 				sourceInfo: createSyntheticSourceInfo("/fake/path", { source: "custom" }),

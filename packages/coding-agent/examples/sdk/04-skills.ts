@@ -18,6 +18,7 @@ import {
 const customSkill: Skill = {
 	name: "my-skill",
 	description: "Custom project instructions",
+	categories: [],
 	filePath: "/virtual/SKILL.md",
 	baseDir: "/virtual",
 	sourceInfo: createSyntheticSourceInfo("/virtual/SKILL.md", { source: "sdk" }),

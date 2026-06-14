@@ -103,8 +103,10 @@ export type RpcCommand =
 		// Messages
 		| { id?: string; type: "get_messages" }
 
-		// Commands (available for invocation via prompt)
+		// Commands and skills (available for invocation via prompt)
 		| { id?: string; type: "get_commands" }
+		| { id?: string; type: "get_skill_detail"; name: string }
+		| { id?: string; type: "suggest_skills"; query: string; limit?: number; minScore?: number }
 
 		// Sub-agents
 		| { id?: string; type: "get_subagent_tasks" }
@@ -133,6 +135,12 @@ export interface RpcSlashCommand {
 	name: string;
 	/** Human-readable description */
 	description?: string;
+	/** Optional categories for skill commands. */
+	categories?: string[];
+	/** Friendly location derived from sourceInfo.scope for skill commands. */
+	location?: "user" | "project" | "path";
+	/** Filesystem path for skill commands. */
+	path?: string;
 	/** What kind of command this is */
 	source: "extension" | "markdown" | "prompt" | "skill";
 	/** Source metadata for the owning resource */
@@ -326,13 +334,43 @@ export type RpcResponse =
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
 
-	// Commands
+	// Commands and skills
 	| {
 			id?: string;
 			type: "response";
 			command: "get_commands";
 			success: true;
 			data: { commands: RpcSlashCommand[] };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_skill_detail";
+			success: true;
+			data: {
+				name: string;
+				description: string;
+				categories: string[];
+				path: string;
+				baseDir: string;
+				content: string;
+			};
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "suggest_skills";
+			success: true;
+			data: {
+				skills: Array<{
+					name: string;
+					description: string;
+					categories: string[];
+					path: string;
+					score: number;
+					reasons: string[];
+				}>;
+			};
 	  }
 
 	// Sub-agents

@@ -29,9 +29,11 @@ import type {
 import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
 import { createAgentSession } from "../../core/sdk.js";
 import { SessionManager } from "../../core/session-manager.js";
+import { scoreSkillsByRelevance } from "../../core/skills.js";
 import { getGlobalSubagentManager } from "../../core/subagent/index.js";
 import { createFastFetchToolDefinition } from "../../core/tools/index.js";
 import { getTextOutput } from "../../core/tools/render-utils.js";
+import { stripFrontmatter } from "../../utils/frontmatter.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { type Theme, theme } from "../interactive/theme/theme.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
@@ -1159,15 +1161,54 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				}
 
 				for (const skill of session.resourceLoader.getSkills().skills) {
+					const scope = skill.sourceInfo.scope;
 					commands.push({
 						name: `skill:${skill.name}`,
 						description: skill.description,
+						categories: skill.categories,
+						location: scope === "user" || scope === "project" ? scope : "path",
+						path: skill.filePath,
 						source: "skill",
 						sourceInfo: skill.sourceInfo,
 					});
 				}
 
 				return success(id, "get_commands", { commands });
+			}
+
+			case "get_skill_detail": {
+				const rawName = command.name.trim();
+				const name = rawName.startsWith("skill:") ? rawName.slice(6) : rawName;
+				const skill = session.resourceLoader.getSkills().skills.find((s) => s.name === name);
+				if (!skill) {
+					return error(id, "get_skill_detail", `Skill not found: ${name}`);
+				}
+				const content = stripFrontmatter(fs.readFileSync(skill.filePath, "utf-8")).trim();
+				return success(id, "get_skill_detail", {
+					name: skill.name,
+					description: skill.description,
+					categories: skill.categories,
+					path: skill.filePath,
+					baseDir: skill.baseDir,
+					content,
+				});
+			}
+
+			case "suggest_skills": {
+				const scored = scoreSkillsByRelevance(command.query, session.resourceLoader.getSkills().skills, {
+					limit: command.limit,
+					minScore: command.minScore,
+				});
+				return success(id, "suggest_skills", {
+					skills: scored.map(({ skill, score, reasons }) => ({
+						name: skill.name,
+						description: skill.description,
+						categories: skill.categories,
+						path: skill.filePath,
+						score,
+						reasons,
+					})),
+				});
 			}
 
 			// =================================================================

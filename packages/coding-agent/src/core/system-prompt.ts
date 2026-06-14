@@ -165,6 +165,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	);
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
+	const skillsSection = hasRead && skills.length > 0 ? formatSkillsForPrompt(skills) : "";
 
 	let prompt = `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 
@@ -174,7 +175,7 @@ ${toolsList}
 In addition to the tools above, you may have access to other custom tools depending on the project.
 
 Guidelines:
-${guidelines}
+${guidelines}${skillsSection}
 
 Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
 - Main documentation: ${readmePath}
@@ -197,11 +198,6 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 			prompt += `<project_instructions path="${filePath}">\n${content}\n</project_instructions>\n\n`;
 		}
 		prompt += "</project_context>\n";
-	}
-
-	// Append skills section (only if read tool is available)
-	if (hasRead && skills.length > 0) {
-		prompt += formatSkillsForPrompt(skills);
 	}
 
 	// Add date and working directory last

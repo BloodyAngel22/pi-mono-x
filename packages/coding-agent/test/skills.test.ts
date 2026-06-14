@@ -19,6 +19,7 @@ function createTestSkill(options: {
 	return {
 		name: options.name,
 		description: options.description,
+		categories: [],
 		filePath: options.filePath,
 		baseDir: options.baseDir,
 		sourceInfo: createSyntheticSourceInfo(options.filePath, { source: options.source ?? "test" }),

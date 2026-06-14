@@ -80,6 +80,7 @@ This is a test skill.
 		const customSkill = {
 			name: "custom-skill",
 			description: "A custom skill",
+			categories: [] as string[],
 			filePath: "/fake/path/SKILL.md",
 			baseDir: "/fake/path",
 			sourceInfo: createSyntheticSourceInfo("/fake/path/SKILL.md", { source: "sdk" }),
