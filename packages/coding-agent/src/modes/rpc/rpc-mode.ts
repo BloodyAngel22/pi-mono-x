@@ -654,6 +654,23 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		if (!targetSession) {
 			return error(id, command.type, `Session not found: ${targetSessionId}`);
 		}
+
+		if (command.type === "close_session") {
+			if (sessions.size <= 1) {
+				return error(id, "close_session", "Cannot close last session");
+			}
+			const wasActive = activeSessionId === targetSessionId;
+			unsubscribeSession(targetSessionId);
+			targetSession.dispose();
+			sessions.delete(targetSessionId);
+			if (wasActive) {
+				const first = sessions.keys().next().value as string | undefined;
+				activeSessionId = first ?? null;
+				if (first) session = sessions.get(first)!;
+			}
+			return success(id, "close_session");
+		}
+
 		activeSessionId = targetSessionId;
 		session = targetSession;
 
@@ -662,21 +679,6 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				activeSessionId = targetSessionId;
 				session = targetSession;
 				return success(id, "switch_active_session");
-			}
-
-			case "close_session": {
-				if (sessions.size <= 1) {
-					return error(id, "close_session", "Cannot close last session");
-				}
-				unsubscribeSession(targetSessionId);
-				targetSession.dispose();
-				sessions.delete(targetSessionId);
-				if (activeSessionId === targetSessionId) {
-					const first = sessions.keys().next().value as string | undefined;
-					activeSessionId = first ?? null;
-					if (first) session = sessions.get(first)!;
-				}
-				return success(id, "close_session");
 			}
 
 			// =================================================================
