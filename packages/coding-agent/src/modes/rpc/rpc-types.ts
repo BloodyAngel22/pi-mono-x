@@ -22,85 +22,106 @@ import type { FastFetchToolDetails } from "../../core/tools/index.js";
 
 export type RpcCommand =
 	// Prompting
-	| { id?: string; type: "prompt"; message: string; images?: ImageContent[]; streamingBehavior?: "steer" | "followUp" }
-	| { id?: string; type: "steer"; message: string; images?: ImageContent[] }
-	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
-	| { id?: string; type: "btw"; question: string }
-	| { id?: string; type: "fast_context"; query: string }
-	| {
-			id?: string;
-			type: "fast_fetch";
-			query: string;
-			mode?: "search" | "url";
-			maxResults?: number;
-			timeoutMs?: number;
-	  }
-	| { id?: string; type: "abort" }
-	| { id?: string; type: "new_session"; parentSession?: string }
+	(
+		| {
+				id?: string;
+				type: "prompt";
+				message: string;
+				images?: ImageContent[];
+				streamingBehavior?: "steer" | "followUp";
+		  }
+		| { id?: string; type: "steer"; message: string; images?: ImageContent[] }
+		| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
+		| { id?: string; type: "btw"; question: string }
+		| { id?: string; type: "fast_context"; query: string }
+		| {
+				id?: string;
+				type: "fast_fetch";
+				query: string;
+				mode?: "search" | "url";
+				maxResults?: number;
+				timeoutMs?: number;
+		  }
+		| { id?: string; type: "abort" }
+		| { id?: string; type: "new_session"; parentSession?: string }
 
-	// State
-	| { id?: string; type: "get_state" }
-	| { id?: string; type: "cd"; path: string }
-	| { id?: string; type: "pwd" }
-	| { id?: string; type: "ls"; path?: string }
+		// State
+		| { id?: string; type: "get_state" }
+		| { id?: string; type: "cd"; path: string }
+		| { id?: string; type: "pwd" }
+		| { id?: string; type: "ls"; path?: string }
 
-	// Model
-	| { id?: string; type: "set_model"; provider: string; modelId: string }
-	| { id?: string; type: "cycle_model" }
-	| { id?: string; type: "get_available_models" }
+		// Model
+		| { id?: string; type: "set_model"; provider: string; modelId: string }
+		| { id?: string; type: "cycle_model" }
+		| { id?: string; type: "get_available_models" }
 
-	// Thinking
-	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel }
-	| { id?: string; type: "cycle_thinking_level" }
+		// Thinking
+		| { id?: string; type: "set_thinking_level"; level: ThinkingLevel }
+		| { id?: string; type: "cycle_thinking_level" }
 
-	// Queue modes
-	| { id?: string; type: "set_steering_mode"; mode: "all" | "one-at-a-time" }
-	| { id?: string; type: "set_follow_up_mode"; mode: "all" | "one-at-a-time" }
+		// Queue modes
+		| { id?: string; type: "set_steering_mode"; mode: "all" | "one-at-a-time" }
+		| { id?: string; type: "set_follow_up_mode"; mode: "all" | "one-at-a-time" }
 
-	// Compaction
-	| { id?: string; type: "compact"; customInstructions?: string }
-	| { id?: string; type: "set_auto_compaction"; enabled: boolean }
+		// Compaction
+		| { id?: string; type: "compact"; customInstructions?: string }
+		| { id?: string; type: "set_auto_compaction"; enabled: boolean }
 
-	// Retry
-	| { id?: string; type: "set_auto_retry"; enabled: boolean }
-	| { id?: string; type: "abort_retry" }
+		// Retry
+		| { id?: string; type: "set_auto_retry"; enabled: boolean }
+		| { id?: string; type: "abort_retry" }
 
-	// Bash
-	| { id?: string; type: "bash"; command: string }
-	| { id?: string; type: "abort_bash" }
+		// Bash
+		| { id?: string; type: "bash"; command: string }
+		| { id?: string; type: "abort_bash" }
 
-	// Session
-	| { id?: string; type: "get_session_stats" }
-	| { id?: string; type: "export_html"; outputPath?: string }
-	| { id?: string; type: "switch_session"; sessionPath: string }
-	| {
-			id?: string;
-			type: "navigate_tree";
-			targetId: string;
-			summarize?: boolean;
-			customInstructions?: string;
-			replaceInstructions?: boolean;
-			label?: string;
-			exact?: boolean;
-	  }
-	| { id?: string; type: "fork"; entryId: string; position?: "at" | "before" }
-	| { id?: string; type: "clone" }
-	| { id?: string; type: "get_fork_messages" }
-	| { id?: string; type: "get_last_assistant_text" }
-	| { id?: string; type: "set_session_name"; name: string }
-	| { id?: string; type: "get_file_checkpoint_status" }
-	| { id?: string; type: "get_file_checkpoint_turn_status"; turnIndex: number }
-	| { id?: string; type: "restore_file_changes_to_turn"; turnIndex: number }
-	| { id?: string; type: "get_session_tree" }
+		// Session
+		| { id?: string; type: "get_session_stats" }
+		| { id?: string; type: "export_html"; outputPath?: string }
+		| { id?: string; type: "switch_session"; sessionPath: string }
+		| {
+				id?: string;
+				type: "navigate_tree";
+				targetId: string;
+				summarize?: boolean;
+				customInstructions?: string;
+				replaceInstructions?: boolean;
+				label?: string;
+				exact?: boolean;
+		  }
+		| { id?: string; type: "fork"; entryId: string; position?: "at" | "before" }
+		| { id?: string; type: "clone" }
+		| { id?: string; type: "get_fork_messages" }
+		| { id?: string; type: "get_last_assistant_text" }
+		| { id?: string; type: "set_session_name"; name: string }
+		| { id?: string; type: "get_file_checkpoint_status" }
+		| { id?: string; type: "get_file_checkpoint_turn_status"; turnIndex: number }
+		| { id?: string; type: "restore_file_changes_to_turn"; turnIndex: number }
+		| { id?: string; type: "get_session_tree" }
 
-	// Messages
-	| { id?: string; type: "get_messages" }
+		// Messages
+		| { id?: string; type: "get_messages" }
 
-	// Commands (available for invocation via prompt)
-	| { id?: string; type: "get_commands" }
+		// Commands (available for invocation via prompt)
+		| { id?: string; type: "get_commands" }
 
-	// Sub-agents
-	| { id?: string; type: "get_subagent_tasks" };
+		// Sub-agents
+		| { id?: string; type: "get_subagent_tasks" }
+
+		// Multi-session
+		| {
+				id?: string;
+				type: "create_session";
+				cwd?: string;
+				mode?: "empty" | "copy";
+				sourceSessionId?: string;
+				sessionPath?: string;
+		  }
+		| { id?: string; type: "switch_active_session"; sessionId: string }
+		| { id?: string; type: "close_session"; sessionId: string }
+		| { id?: string; type: "list_sessions" }
+	) & { sessionId?: string };
 
 // ============================================================================
 // RPC Slash Command (for get_commands response)
@@ -162,6 +183,27 @@ export type RpcResponse =
 	  }
 	| { id?: string; type: "response"; command: "abort"; success: true }
 	| { id?: string; type: "response"; command: "new_session"; success: true; data: { cancelled: boolean } }
+
+	// Multi-session
+	| { id?: string; type: "response"; command: "create_session"; success: true; data: { sessionId: string } }
+	| { id?: string; type: "response"; command: "switch_active_session"; success: true }
+	| { id?: string; type: "response"; command: "close_session"; success: true }
+	| {
+			id?: string;
+			type: "response";
+			command: "list_sessions";
+			success: true;
+			data: {
+				sessions: Array<{
+					sessionId: string;
+					name?: string;
+					messageCount: number;
+					isActive: boolean;
+					cwd?: string;
+					isStreaming: boolean;
+				}>;
+			};
+	  }
 
 	// State
 	| { id?: string; type: "response"; command: "get_state"; success: true; data: RpcSessionState }

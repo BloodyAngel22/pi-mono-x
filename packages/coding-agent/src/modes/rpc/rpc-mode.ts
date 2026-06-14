@@ -16,6 +16,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { completeSimple, type Message } from "@earendil-works/pi-ai";
+import type { AgentSession } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "../../core/auth-guidance.js";
 import { fastContextSearch } from "../../core/context-search.js";
@@ -26,6 +27,8 @@ import type {
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.js";
 import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
+import { createAgentSession } from "../../core/sdk.js";
+import { SessionManager } from "../../core/session-manager.js";
 import { getGlobalSubagentManager } from "../../core/subagent/index.js";
 import { createFastFetchToolDefinition } from "../../core/tools/index.js";
 import { getTextOutput } from "../../core/tools/render-utils.js";
@@ -57,7 +60,10 @@ export type {
 export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<never> {
 	takeOverStdout();
 	let session = runtimeHost.session;
-	let unsubscribe: (() => void) | undefined;
+	const sessions = new Map<string, AgentSession>();
+	const sessionSubscriptions = new Map<string, () => void>();
+	let activeSessionId: string | null = null;
+	let sessionCounter = 0;
 
 	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
 		writeRawStdout(serializeJsonLine(obj));
@@ -106,6 +112,16 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		}
 	};
 
+	const extractUserMessageText = (content: string | Array<{ type: string; text?: string }>): string => {
+		if (typeof content === "string") return content;
+		return content
+			.filter(
+				(part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string",
+			)
+			.map((part) => part.text)
+			.join("");
+	};
+
 	// Pending extension UI requests waiting for response
 	const pendingExtensionRequests = new Map<
 		string,
@@ -119,6 +135,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 	/** Helper for dialog methods with signal/timeout support */
 	function createDialogPromise<T>(
+		sessionId: string | undefined,
 		opts: ExtensionUIDialogOptions | undefined,
 		defaultValue: T,
 		request: Record<string, unknown>,
@@ -156,31 +173,49 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				},
 				reject,
 			});
-			output({ type: "extension_ui_request", id, ...request } as RpcExtensionUIRequest);
+			output({
+				type: "extension_ui_request",
+				id,
+				...request,
+				...(sessionId ? { sessionId } : {}),
+			} as RpcExtensionUIRequest);
 		});
 	}
 
 	/**
 	 * Create an extension UI context that uses the RPC protocol.
 	 */
-	const createExtensionUIContext = (): ExtensionUIContext => ({
+	const createExtensionUIContext = (sessionId?: string): ExtensionUIContext => ({
 		select: (title, options, opts) =>
-			createDialogPromise(opts, undefined, { method: "select", title, options, timeout: opts?.timeout }, (r) =>
-				"cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined,
+			createDialogPromise(
+				sessionId,
+				opts,
+				undefined,
+				{ method: "select", title, options, timeout: opts?.timeout },
+				(r) => ("cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined),
 			),
 
 		confirm: (title, message, opts) =>
-			createDialogPromise(opts, false, { method: "confirm", title, message, timeout: opts?.timeout }, (r) =>
-				"cancelled" in r && r.cancelled ? false : "confirmed" in r ? r.confirmed : false,
+			createDialogPromise(
+				sessionId,
+				opts,
+				false,
+				{ method: "confirm", title, message, timeout: opts?.timeout },
+				(r) => ("cancelled" in r && r.cancelled ? false : "confirmed" in r ? r.confirmed : false),
 			),
 
 		input: (title, placeholder, opts) =>
-			createDialogPromise(opts, undefined, { method: "input", title, placeholder, timeout: opts?.timeout }, (r) =>
-				"cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined,
+			createDialogPromise(
+				sessionId,
+				opts,
+				undefined,
+				{ method: "input", title, placeholder, timeout: opts?.timeout },
+				(r) => ("cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined),
 			),
 
 		askUser: (question, options = [], allowMultiple = false, opts) =>
 			createDialogPromise(
+				sessionId,
 				opts,
 				undefined,
 				{ method: "askUser", question, options, allowMultiple, timeout: opts?.timeout },
@@ -195,6 +230,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				method: "notify",
 				message,
 				notifyType: type,
+				...(sessionId ? { sessionId } : {}),
 			} as RpcExtensionUIRequest);
 		},
 
@@ -215,6 +251,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				method: "setStatus",
 				statusKey: key,
 				statusText: text,
+				...(sessionId ? { sessionId } : {}),
 			} as RpcExtensionUIRequest);
 		},
 
@@ -244,6 +281,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					widgetKey: key,
 					widgetLines: content as string[] | undefined,
 					widgetPlacement: options?.placement,
+					...(sessionId ? { sessionId } : {}),
 				} as RpcExtensionUIRequest);
 			}
 			// Component factories are not supported in RPC mode - would need TUI access
@@ -264,6 +302,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				id: crypto.randomUUID(),
 				method: "setTitle",
 				title,
+				...(sessionId ? { sessionId } : {}),
 			} as RpcExtensionUIRequest);
 		},
 
@@ -284,6 +323,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				id: crypto.randomUUID(),
 				method: "set_editor_text",
 				text,
+				...(sessionId ? { sessionId } : {}),
 			} as RpcExtensionUIRequest);
 		},
 
@@ -308,7 +348,14 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					},
 					reject,
 				});
-				output({ type: "extension_ui_request", id, method: "editor", title, prefill } as RpcExtensionUIRequest);
+				output({
+					type: "extension_ui_request",
+					id,
+					method: "editor",
+					title,
+					prefill,
+					...(sessionId ? { sessionId } : {}),
+				} as RpcExtensionUIRequest);
 			});
 		},
 
@@ -352,14 +399,48 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		},
 	});
 
-	runtimeHost.setRebindSession(async () => {
-		await rebindSession();
+	const nextSessionId = (): string => `session-${++sessionCounter}`;
+
+	const getActiveSession = (): AgentSession | undefined =>
+		activeSessionId ? sessions.get(activeSessionId) : undefined;
+
+	const makeRpcSessionState = (sessionId: string, target: AgentSession): RpcSessionState => ({
+		model: target.model,
+		thinkingLevel: target.thinkingLevel,
+		isStreaming: target.isStreaming,
+		isCompacting: target.isCompacting,
+		steeringMode: target.steeringMode,
+		followUpMode: target.followUpMode,
+		sessionFile: target.sessionFile,
+		sessionId,
+		sessionName: target.sessionName,
+		autoCompactionEnabled: target.autoCompactionEnabled,
+		autoRetryEnabled: target.autoRetryEnabled,
+		isRetrying: target.isRetrying,
+		retryAttempt: target.retryAttempt,
+		messageCount: target.messages.length,
+		pendingMessageCount: target.pendingMessageCount,
+		cwd: target.activeCwd,
 	});
 
-	const rebindSession = async (): Promise<void> => {
-		session = runtimeHost.session;
-		session.permissionAsk = async (info) =>
+	function subscribeSession(sessionId: string, target: AgentSession): void {
+		const existing = sessionSubscriptions.get(sessionId);
+		existing?.();
+		const unsubscribe = target.subscribe((event) => {
+			output({ ...event, sessionId });
+		});
+		sessionSubscriptions.set(sessionId, unsubscribe);
+	}
+
+	function unsubscribeSession(sessionId: string): void {
+		sessionSubscriptions.get(sessionId)?.();
+		sessionSubscriptions.delete(sessionId);
+	}
+
+	function registerSession(sessionId: string, target: AgentSession): void {
+		target.permissionAsk = async (info) =>
 			createDialogPromise(
+				sessionId,
 				undefined,
 				{ decision: "deny-once" as const },
 				{
@@ -381,26 +462,25 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					return { decision: "deny-once" as const };
 				},
 			);
+
 		// Set up event routing first so MCP status events reach the frontend
 		// during async initialization (subscribe before bindExtensions resolves).
-		unsubscribe?.();
-		unsubscribe = session.subscribe((event) => {
-			output(event);
-		});
+		subscribeSession(sessionId, target);
+
 		// Fire extension binding without awaiting — session switch/fork returns
 		// immediately; MCPs initialize in the background.
-		void session
+		void target
 			.bindExtensions({
-				uiContext: createExtensionUIContext(),
+				uiContext: createExtensionUIContext(sessionId),
 				commandContextActions: {
-					waitForIdle: () => session.agent.waitForIdle(),
+					waitForIdle: () => target.agent.waitForIdle(),
 					newSession: async (options) => runtimeHost.newSession(options),
 					fork: async (entryId, forkOptions) => {
 						const result = await runtimeHost.fork(entryId, forkOptions);
 						return { cancelled: result.cancelled };
 					},
 					navigateTree: async (targetId, options) => {
-						const result = await session.navigateTree(targetId, {
+						const result = await target.navigateTree(targetId, {
 							summarize: options?.summarize,
 							customInstructions: options?.customInstructions,
 							replaceInstructions: options?.replaceInstructions,
@@ -412,7 +492,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 						return runtimeHost.switchSession(sessionPath, options);
 					},
 					reload: async () => {
-						await session.reload();
+						await target.reload();
 					},
 				},
 				shutdownHandler: () => {
@@ -421,6 +501,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				onError: (err) => {
 					output({
 						type: "extension_error",
+						sessionId,
 						extensionPath: err.extensionPath,
 						event: err.event,
 						error: err.error,
@@ -428,9 +509,32 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				},
 			})
 			.catch((err: unknown) => {
-				output({ type: "extension_error", extensionPath: "<rebind>", event: "session_start", error: String(err) });
+				output({
+					type: "extension_error",
+					sessionId,
+					extensionPath: "<rebind>",
+					event: "session_start",
+					error: String(err),
+				});
 			});
+	}
+
+	const rebindSession = async (): Promise<void> => {
+		const replacement = runtimeHost.session;
+		const sid = activeSessionId ?? nextSessionId();
+		const previous = sessions.get(sid);
+		if (previous && previous !== replacement) {
+			unsubscribeSession(sid);
+		}
+		sessions.set(sid, replacement);
+		activeSessionId = sid;
+		session = replacement;
+		registerSession(sid, replacement);
 	};
+
+	runtimeHost.setRebindSession(async () => {
+		await rebindSession();
+	});
 
 	const registerSignalHandlers = (): void => {
 		const signals: NodeJS.Signals[] = ["SIGTERM"];
@@ -455,7 +559,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	// Fast Context / Fetch helpers
 	// -----------------------------------------------------------------
 	async function runFastContext(query: string) {
-		const ui = createExtensionUIContext();
+		const ui = createExtensionUIContext(activeSessionId ?? undefined);
 		ui.setStatus("fast-context", "searching...");
 		try {
 			const result = await fastContextSearch(session.activeCwd, query, { maxFiles: 12, includeSnippets: false });
@@ -468,7 +572,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	}
 
 	async function runFastFetch(command: Extract<RpcCommand, { type: "fast_fetch" }>) {
-		const ui = createExtensionUIContext();
+		const ui = createExtensionUIContext(activeSessionId ?? undefined);
 		ui.setStatus("fast-fetch", "fetching...");
 		try {
 			const tool = createFastFetchToolDefinition(session.activeCwd, {
@@ -498,7 +602,83 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
 		const id = command.id;
 
+		if (command.type === "list_sessions") {
+			return success(id, "list_sessions", {
+				sessions: Array.from(sessions.entries()).map(([sid, target]) => ({
+					sessionId: sid,
+					name: target.sessionName,
+					messageCount: target.messages.length,
+					isActive: sid === activeSessionId,
+					cwd: target.activeCwd,
+					isStreaming: target.isStreaming,
+				})),
+			});
+		}
+
+		if (command.type === "create_session") {
+			const sourceSession = command.sourceSessionId ? sessions.get(command.sourceSessionId) : undefined;
+			const baseSession = sourceSession ?? getActiveSession() ?? session;
+			const sid = nextSessionId();
+			const newCwd = command.cwd || baseSession.activeCwd;
+			const sessionManager = command.sessionPath
+				? SessionManager.open(command.sessionPath)
+				: SessionManager.create(newCwd, baseSession.sessionManager.getSessionDir());
+			if (!command.sessionPath && command.mode === "copy") {
+				for (const message of baseSession.messages) {
+					sessionManager.appendMessage(message as Parameters<SessionManager["appendMessage"]>[0]);
+				}
+			}
+			const effectiveCwd = command.cwd || sessionManager.getCwd() || baseSession.activeCwd;
+			const { session: newSession } = await createAgentSession({
+				cwd: effectiveCwd,
+				sessionManager,
+				modelRegistry: baseSession.modelRegistry,
+				settingsManager: baseSession.settingsManager,
+				model: baseSession.model,
+				thinkingLevel: baseSession.thinkingLevel,
+				tools: baseSession.getActiveToolNames(),
+			});
+			sessions.set(sid, newSession);
+			activeSessionId = sid;
+			session = newSession;
+			registerSession(sid, newSession);
+			return success(id, "create_session", { sessionId: sid });
+		}
+
+		const requestedSessionId = command.sessionId;
+		const targetSessionId = requestedSessionId || activeSessionId;
+		if (!targetSessionId) {
+			return error(id, command.type, "No active session");
+		}
+		const targetSession = sessions.get(targetSessionId);
+		if (!targetSession) {
+			return error(id, command.type, `Session not found: ${targetSessionId}`);
+		}
+		activeSessionId = targetSessionId;
+		session = targetSession;
+
 		switch (command.type) {
+			case "switch_active_session": {
+				activeSessionId = targetSessionId;
+				session = targetSession;
+				return success(id, "switch_active_session");
+			}
+
+			case "close_session": {
+				if (sessions.size <= 1) {
+					return error(id, "close_session", "Cannot close last session");
+				}
+				unsubscribeSession(targetSessionId);
+				targetSession.dispose();
+				sessions.delete(targetSessionId);
+				if (activeSessionId === targetSessionId) {
+					const first = sessions.keys().next().value as string | undefined;
+					activeSessionId = first ?? null;
+					if (first) session = sessions.get(first)!;
+				}
+				return success(id, "close_session");
+			}
+
 			// =================================================================
 			// Prompting
 			// =================================================================
@@ -625,25 +805,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "get_state": {
-				const state: RpcSessionState = {
-					model: session.model,
-					thinkingLevel: session.thinkingLevel,
-					isStreaming: session.isStreaming,
-					isCompacting: session.isCompacting,
-					steeringMode: session.steeringMode,
-					followUpMode: session.followUpMode,
-					sessionFile: session.sessionFile,
-					sessionId: session.sessionId,
-					sessionName: session.sessionName,
-					autoCompactionEnabled: session.autoCompactionEnabled,
-					autoRetryEnabled: session.autoRetryEnabled,
-					isRetrying: session.isRetrying,
-					retryAttempt: session.retryAttempt,
-					messageCount: session.messages.length,
-					pendingMessageCount: session.pendingMessageCount,
-					cwd: session.activeCwd,
-				};
-				return success(id, "get_state", state);
+				return success(id, "get_state", makeRpcSessionState(targetSessionId, session));
 			}
 
 			case "pwd": {
@@ -825,10 +987,56 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "fork": {
-				const result = await runtimeHost.fork(command.entryId, {
-					position: command.position,
+				const position = command.position ?? "before";
+				const selectedEntry = session.sessionManager.getEntry(command.entryId);
+				if (!selectedEntry) {
+					return error(id, "fork", "Invalid entry ID for forking");
+				}
+				let targetLeafId: string | null;
+				let selectedText: string | undefined;
+				if (position === "at") {
+					targetLeafId = selectedEntry.id;
+				} else {
+					if (selectedEntry.type !== "message" || selectedEntry.message.role !== "user") {
+						return error(id, "fork", "Invalid entry ID for forking");
+					}
+					targetLeafId = selectedEntry.parentId;
+					selectedText = extractUserMessageText(selectedEntry.message.content);
+				}
+
+				const currentSessionFile = session.sessionFile;
+				let nextManager: SessionManager;
+				if (!targetLeafId) {
+					nextManager = SessionManager.create(session.activeCwd, session.sessionManager.getSessionDir());
+					nextManager.newSession({ parentSession: currentSessionFile });
+				} else {
+					// Use the live manager, not a freshly opened JSONL file: in a just-created
+					// parallel tab the branch entries may exist in memory before the file is
+					// flushed to disk. We replace this tab's session immediately below, so
+					// mutating the current manager is safe.
+					const forkedSessionPath = session.sessionManager.createBranchedSession(targetLeafId);
+					if (!forkedSessionPath && session.sessionManager.isPersisted()) {
+						return error(id, "fork", "Failed to create forked session");
+					}
+					nextManager = session.sessionManager;
+				}
+
+				unsubscribeSession(targetSessionId);
+				session.dispose();
+				const { session: forkedSession } = await createAgentSession({
+					cwd: nextManager.getCwd(),
+					sessionManager: nextManager,
+					modelRegistry: session.modelRegistry,
+					settingsManager: session.settingsManager,
+					model: session.model,
+					thinkingLevel: session.thinkingLevel,
+					tools: session.getActiveToolNames(),
 				});
-				return success(id, "fork", { text: result.selectedText, cancelled: result.cancelled });
+				sessions.set(targetSessionId, forkedSession);
+				activeSessionId = targetSessionId;
+				session = forkedSession;
+				registerSession(targetSessionId, forkedSession);
+				return success(id, "fork", { text: selectedText, cancelled: false });
 			}
 
 			case "clone": {
@@ -836,8 +1044,27 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				if (!leafId) {
 					return error(id, "clone", "Cannot clone session: no current entry selected");
 				}
-				const result = await runtimeHost.fork(leafId, { position: "at" });
-				return success(id, "clone", { cancelled: result.cancelled });
+				const forkedSessionPath = session.sessionManager.createBranchedSession(leafId);
+				if (!forkedSessionPath && session.sessionManager.isPersisted()) {
+					return error(id, "clone", "Failed to clone session");
+				}
+				const nextManager = session.sessionManager;
+				unsubscribeSession(targetSessionId);
+				session.dispose();
+				const { session: clonedSession } = await createAgentSession({
+					cwd: nextManager.getCwd(),
+					sessionManager: nextManager,
+					modelRegistry: session.modelRegistry,
+					settingsManager: session.settingsManager,
+					model: session.model,
+					thinkingLevel: session.thinkingLevel,
+					tools: session.getActiveToolNames(),
+				});
+				sessions.set(targetSessionId, clonedSession);
+				activeSessionId = targetSessionId;
+				session = clonedSession;
+				registerSession(targetSessionId, clonedSession);
+				return success(id, "clone", { cancelled: false });
 			}
 
 			case "get_fork_messages": {
@@ -884,11 +1111,12 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				const rawMessages = session.messages;
 				const entries = (session.sessionManager as any).getBranch() as Array<{
 					type: string;
-					message: unknown;
+					message?: unknown;
 					id: string;
 				}>;
-				const annotated = rawMessages.map((msg) => {
-					const entry = entries.find((e) => e.type === "message" && e.message === msg);
+				const messageEntries = entries.filter((e) => e.type === "message");
+				const annotated = rawMessages.map((msg, index) => {
+					const entry = messageEntries.find((e) => e.message === msg) ?? messageEntries[index];
 					return entry ? { ...msg, entryId: entry.id } : msg;
 				});
 				return success(id, "get_messages", { messages: annotated });
@@ -971,7 +1199,17 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		for (const cleanup of signalCleanupHandlers) {
 			cleanup();
 		}
-		unsubscribe?.();
+		for (const [, unsubscribe] of sessionSubscriptions) {
+			unsubscribe();
+		}
+		sessionSubscriptions.clear();
+		const hostSession = runtimeHost.session;
+		for (const [, target] of sessions) {
+			if (target !== hostSession) {
+				target.dispose();
+			}
+		}
+		sessions.clear();
 		await runtimeHost.dispose();
 		detachInput();
 		process.stdin.pause();
