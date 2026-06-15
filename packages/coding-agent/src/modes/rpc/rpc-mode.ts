@@ -16,7 +16,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { completeSimple, type Message } from "@earendil-works/pi-ai";
-import type { AgentSession } from "../../core/agent-session.js";
+import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "../../core/auth-guidance.js";
 import { fastContextSearch } from "../../core/context-search.js";
@@ -54,6 +54,24 @@ export type {
 	RpcResponse,
 	RpcSessionState,
 } from "./rpc-types.js";
+
+function sanitizeRpcEvent(
+	event: AgentSessionEvent,
+): Omit<AgentSessionEvent, "messages" | "args" | "message"> | AgentSessionEvent {
+	if (event.type === "agent_end") {
+		const { messages: _messages, ...rest } = event;
+		return rest;
+	}
+	if (event.type === "tool_execution_update") {
+		const { args: _args, ...rest } = event;
+		return rest;
+	}
+	if (event.type === "message_update") {
+		const { message: _message, ...rest } = event;
+		return rest;
+	}
+	return event;
+}
 
 /**
  * Run in RPC mode.
@@ -429,7 +447,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		const existing = sessionSubscriptions.get(sessionId);
 		existing?.();
 		const unsubscribe = target.subscribe((event) => {
-			output({ ...event, sessionId });
+			output({ ...sanitizeRpcEvent(event), sessionId });
 		});
 		sessionSubscriptions.set(sessionId, unsubscribe);
 	}

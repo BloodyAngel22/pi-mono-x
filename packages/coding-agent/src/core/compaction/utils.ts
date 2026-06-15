@@ -3,7 +3,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Message } from "@earendil-works/pi-ai";
+import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 
 // ============================================================================
 // File Operation Tracking
@@ -79,6 +79,92 @@ export function formatFileOperations(readFiles: string[], modifiedFiles: string[
 	}
 	if (sections.length === 0) return "";
 	return `\n\n${sections.join("\n\n")}`;
+}
+
+// ============================================================================
+// Tool Result Compression
+// ============================================================================
+
+export interface ToolResultCompressionOptions {
+	/** Tool results with text output below this threshold are considered trivial. */
+	smallTextThreshold?: number;
+	/**
+	 * Drop trivial successful tool results entirely.
+	 * Use only for summarization text, not provider conversation context, because
+	 * provider APIs often require assistant tool calls to have matching tool results.
+	 */
+	dropSmallResults?: boolean;
+}
+
+const DEFAULT_SMALL_TOOL_RESULT_THRESHOLD = 200;
+
+function extractToolResultStats(content: (TextContent | ImageContent)[]): { text: string; imageCount: number } {
+	const textParts: string[] = [];
+	let imageCount = 0;
+	for (const block of content) {
+		if (block.type === "text" && typeof block.text === "string") {
+			textParts.push(block.text);
+		} else if (block.type === "image") {
+			imageCount += 1;
+		}
+	}
+	return { text: textParts.join(""), imageCount };
+}
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes}B`;
+	const kb = bytes / 1024;
+	if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)}KB`;
+	const mb = kb / 1024;
+	return `${mb.toFixed(mb >= 10 ? 0 : 1)}MB`;
+}
+
+function formatCompressedToolResult(toolName: string, toolCallId: string, text: string, imageCount: number): string {
+	const trimmed = text.trim();
+	const lineCount = trimmed ? trimmed.split(/\r?\n/).length : 0;
+	const parts = [`${lineCount} lines`, formatBytes(text.length)];
+	if (imageCount > 0) parts.push(`${imageCount} image${imageCount === 1 ? "" : "s"}`);
+	return `[Compressed successful tool result: ${toolName} (${toolCallId}) → ${parts.join(" / ")}]`;
+}
+
+/**
+ * Algorithmically compress successful tool results in older context.
+ *
+ * Error tool results are preserved verbatim. For provider conversation context,
+ * prefer metadata replacement over dropping so assistant tool calls still have a
+ * matching tool result message.
+ */
+export function compressToolResults(
+	messages: AgentMessage[],
+	options: ToolResultCompressionOptions = {},
+): AgentMessage[] {
+	const smallTextThreshold = options.smallTextThreshold ?? DEFAULT_SMALL_TOOL_RESULT_THRESHOLD;
+	const compressed: AgentMessage[] = [];
+
+	for (const message of messages) {
+		if (message.role !== "toolResult" || message.isError) {
+			compressed.push(message);
+			continue;
+		}
+
+		const { text, imageCount } = extractToolResultStats(message.content);
+		const isSmall = text.trim().length < smallTextThreshold && imageCount === 0;
+		if (isSmall && options.dropSmallResults) {
+			continue;
+		}
+
+		compressed.push({
+			...message,
+			content: [
+				{
+					type: "text",
+					text: formatCompressedToolResult(message.toolName, message.toolCallId, text, imageCount),
+				},
+			],
+		});
+	}
+
+	return compressed;
 }
 
 // ============================================================================

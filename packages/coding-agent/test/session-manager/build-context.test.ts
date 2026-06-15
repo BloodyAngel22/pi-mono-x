@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
 import {
 	type BranchSummaryEntry,
@@ -263,6 +264,161 @@ describe("buildSessionContext", () => {
 			const ctx = buildSessionContext(entries, "2");
 			// Should only get the orphan since parent chain is broken
 			expect(ctx.messages).toHaveLength(1);
+		});
+	});
+
+	describe("compression in pre-compaction kept messages", () => {
+		function toolMsg(
+			id: string,
+			parentId: string | null,
+			fields: { toolName: string; text: string; isError?: boolean },
+		): SessionMessageEntry {
+			const msg: AgentMessage = {
+				role: "toolResult",
+				toolCallId: `tc-${id}`,
+				toolName: fields.toolName,
+				content: [{ type: "text", text: fields.text }],
+				isError: fields.isError ?? false,
+				timestamp: 1,
+			};
+			return { type: "message", id, parentId, timestamp: "2025-01-01T00:00:00Z", message: msg };
+		}
+
+		it("compresses successful tool results in kept pre-compaction messages", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "first"),
+				msg("2", "1", "assistant", "r1"),
+				toolMsg("3", "2", { toolName: "read", text: "line1\nline2\n" }),
+				msg("4", "3", "user", "second"),
+				compaction("5", "4", "Compacted", "3"),
+				msg("6", "5", "user", "third"),
+			];
+			const ctx = buildSessionContext(entries);
+
+			expect(ctx.messages).toHaveLength(4);
+			expect((ctx.messages[3] as any).content).toBe("third");
+
+			const compressed = ctx.messages[1];
+			expect(compressed.role).toBe("toolResult");
+			if ("content" in compressed && Array.isArray(compressed.content)) {
+				const text = compressed.content.find((c) => c.type === "text") as { text: string } | undefined;
+				expect(text?.text).toMatch(/\[Compressed successful tool result: read/);
+			}
+		});
+
+		it("leaves messages after compaction uncompressed", () => {
+			// firstKeptEntryId = "1" means entry 1 is kept before compaction.
+			// Entry 3 is after compaction. It should NOT be compressed.
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "first"),
+				compaction("2", "1", "Compacted", "1"),
+				toolMsg("3", "2", { toolName: "bash", text: "output\n".repeat(100) }),
+			];
+			const ctx = buildSessionContext(entries);
+
+			expect(ctx.messages).toHaveLength(3); // summary + kept user + after-compaction toolResult
+			const toolResultMsg = ctx.messages[2];
+			expect(toolResultMsg.role).toBe("toolResult");
+			if ("content" in toolResultMsg && Array.isArray(toolResultMsg.content)) {
+				const text = toolResultMsg.content.find((c) => c.type === "text") as { text: string } | undefined;
+				expect(text?.text).not.toMatch(/Compressed successful/);
+				expect(text?.text).toContain("output");
+			}
+		});
+
+		it("leaves error tool results uncompressed even in kept zone", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "first"),
+				toolMsg("2", "1", { toolName: "bash", text: "ERROR: something broke", isError: true }),
+				msg("3", "2", "assistant", "r1"),
+				compaction("4", "3", "Compacted", "2"),
+			];
+			const ctx = buildSessionContext(entries);
+
+			expect(ctx.messages).toHaveLength(3);
+			const errMsg = ctx.messages[1];
+			expect(errMsg.role).toBe("toolResult");
+			if ("isError" in errMsg) expect(errMsg.isError).toBe(true);
+			if ("content" in errMsg && Array.isArray(errMsg.content)) {
+				const text = errMsg.content.find((c) => c.type === "text") as { text: string } | undefined;
+				expect(text?.text).toBe("ERROR: something broke");
+			}
+		});
+
+		it("does not compress anything when no compaction entry exists", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "first"),
+				toolMsg("2", "1", { toolName: "bash", text: "output" }),
+			];
+			const ctx = buildSessionContext(entries);
+
+			expect(ctx.messages).toHaveLength(2);
+			expect(ctx.messages[1].role).toBe("toolResult");
+			if ("content" in ctx.messages[1] && Array.isArray(ctx.messages[1].content)) {
+				const text = ctx.messages[1].content.find((c) => c.type === "text") as { text: string } | undefined;
+				expect(text?.text).toBe("output");
+			}
+		});
+
+		it("compresses multiple tool results in kept zone", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "first"),
+				msg("2", "1", "assistant", "r1"),
+				toolMsg("3", "2", { toolName: "read", text: "content1\n" }),
+				msg("4", "3", "user", "second"),
+				msg("5", "4", "assistant", "r2"),
+				toolMsg("6", "5", { toolName: "bash", text: "done" }),
+				compaction("7", "6", "Compacted", "3"),
+			];
+			const ctx = buildSessionContext(entries);
+
+			expect(ctx.messages).toHaveLength(5);
+
+			const compressedTool1 = ctx.messages[1];
+			expect(compressedTool1.role).toBe("toolResult");
+			if ("toolName" in compressedTool1) expect(compressedTool1.toolName).toBe("read");
+
+			const compressedTool2 = ctx.messages[4];
+			expect(compressedTool2.role).toBe("toolResult");
+			if ("toolName" in compressedTool2) expect(compressedTool2.toolName).toBe("bash");
+		});
+
+		it("[BEFORE vs AFTER] same message — raw in recent zone, compressed in kept zone", () => {
+			// Two identical tool results. One before compaction (kept zone), one after (recent zone).
+			// BEFORE: both are raw. AFTER: only the one in recent zone stays raw.
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "start"),
+				msg("2", "1", "assistant", "r1"),
+				toolMsg("3", "2", { toolName: "bash", text: "\n".repeat(100) }), // ← before compaction
+				compaction("4", "3", "Compacted", "3"),
+				msg("5", "4", "user", "again"),
+				msg("6", "5", "assistant", "r2"),
+				toolMsg("7", "6", { toolName: "bash", text: "\n".repeat(100) }), // ← after compaction
+			];
+			const ctx = buildSessionContext(entries);
+
+			// summary + compressed(3: bash) + user(5) + assistant(6) + raw(7: bash) = 6
+			// Actually: summary + bash(3) + user(5) + assistant(6) + bash(7)
+			// = 5
+			expect(ctx.messages).toHaveLength(5);
+
+			// ── Index 1: BEFORE COMPACTION → content REPLACED with metadata
+			const keptZone = ctx.messages[1];
+			expect(keptZone.role).toBe("toolResult");
+			if ("content" in keptZone && Array.isArray(keptZone.content)) {
+				const text = keptZone.content.find((c) => c.type === "text") as { text: string } | undefined;
+				expect(text?.text).toMatch(/^\[Compressed successful tool result: bash/);
+				expect(text?.text).not.toContain("\n".repeat(100)); // raw content gone
+			}
+
+			// ── Index 4: AFTER COMPACTION → content UNCHANGED
+			const recentZone = ctx.messages[4];
+			expect(recentZone.role).toBe("toolResult");
+			if ("content" in recentZone && Array.isArray(recentZone.content)) {
+				const text = recentZone.content.find((c) => c.type === "text") as { text: string } | undefined;
+				expect(text?.text).not.toMatch(/^\[Compressed successful/);
+				expect(text?.text).toContain("\n".repeat(100)); // raw content intact
+			}
 		});
 	});
 });

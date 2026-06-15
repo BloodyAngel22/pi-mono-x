@@ -16,6 +16,7 @@ import {
 import { readdir, readFile, stat } from "fs/promises";
 import { join, resolve } from "path";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
+import { compressToolResults } from "./compaction/utils.js";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -400,7 +401,11 @@ export function buildSessionContext(
 		// Find compaction index in path
 		const compactionIdx = path.findIndex((e) => e.type === "compaction" && e.id === compaction.id);
 
-		// Emit kept messages (before compaction, starting from firstKeptEntryId)
+		// Emit kept messages (before compaction, starting from firstKeptEntryId).
+		// These messages are old context retained across compactions; compress their
+		// successful tool results to metadata, but keep recent messages after the
+		// compaction entry verbatim.
+		const keptMessagesBeforeCompaction: AgentMessage[] = [];
 		let foundFirstKept = false;
 		for (let i = 0; i < compactionIdx; i++) {
 			const entry = path[i];
@@ -408,9 +413,20 @@ export function buildSessionContext(
 				foundFirstKept = true;
 			}
 			if (foundFirstKept) {
-				appendMessage(entry);
+				if (entry.type === "message") {
+					keptMessagesBeforeCompaction.push(entry.message);
+				} else if (entry.type === "custom_message") {
+					keptMessagesBeforeCompaction.push(
+						createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp),
+					);
+				} else if (entry.type === "branch_summary" && entry.summary) {
+					keptMessagesBeforeCompaction.push(
+						createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp),
+					);
+				}
 			}
 		}
+		messages.push(...compressToolResults(keptMessagesBeforeCompaction));
 
 		// Emit messages after compaction
 		for (let i = compactionIdx + 1; i < path.length; i++) {

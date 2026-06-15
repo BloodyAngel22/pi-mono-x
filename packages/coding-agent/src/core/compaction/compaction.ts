@@ -16,6 +16,7 @@ import {
 } from "../messages.js";
 import { buildSessionContext, type CompactionEntry, type SessionEntry } from "../session-manager.js";
 import {
+	compressToolResults,
 	computeFileLists,
 	createFileOps,
 	extractFileOpsFromMessage,
@@ -720,8 +721,8 @@ export function prepareCompaction(
 
 	return {
 		firstKeptEntryId,
-		messagesToSummarize,
-		turnPrefixMessages,
+		messagesToSummarize: compressToolResults(messagesToSummarize, { dropSmallResults: true }),
+		turnPrefixMessages: compressToolResults(turnPrefixMessages, { dropSmallResults: true }),
 		isSplitTurn: cutPoint.isSplitTurn,
 		tokensBefore,
 		previousSummary,
