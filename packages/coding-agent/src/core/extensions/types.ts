@@ -336,6 +336,18 @@ export interface ExtensionContext {
 	compact(options?: CompactOptions): void;
 	/** Get the current effective system prompt. */
 	getSystemPrompt(): string;
+	/**
+	 * Invoke another registered tool by name from inside an extension tool/event handler.
+	 * Useful for composite tools such as deep_research that need direct access to
+	 * read-only tools (for example fast_fetch) without asking the model to perform
+	 * a separate tool call.
+	 *
+	 * NOTE: direct invocation bypasses the normal model-driven permission prompt.
+	 * Destructive tools are blocked at runtime; prefer read-only tools.
+	 */
+	invokeTool(toolName: string, params: Record<string, unknown>): Promise<string>;
+	/** Get all registered tools with metadata. */
+	getAllTools(): ToolInfo[];
 }
 
 /**
@@ -1527,6 +1539,8 @@ export interface ExtensionContextActions {
 	getContextUsage: () => ContextUsage | undefined;
 	compact: (options?: CompactOptions) => void;
 	getSystemPrompt: () => string;
+	invokeTool: (toolName: string, params: Record<string, unknown>) => Promise<string>;
+	getAllTools: () => ToolInfo[];
 }
 
 /**

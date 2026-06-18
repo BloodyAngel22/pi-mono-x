@@ -1684,6 +1684,8 @@ export class InteractiveMode {
 				})();
 			},
 			getSystemPrompt: () => this.session.systemPrompt,
+			invokeTool: (toolName, params) => this.session.invokeTool(toolName, params),
+			getAllTools: () => this.session.getAllTools(),
 		});
 
 		// Set up the extension shortcut handler on the default editor

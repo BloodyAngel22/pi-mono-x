@@ -259,12 +259,6 @@ export class SubagentManager {
 			options.onProgress?.(activity);
 		};
 
-		const unsubscribeSession = session.subscribe((event) => {
-			if (event.type === "tool_execution_start") {
-				const e = event as unknown as { toolName: string; args: Record<string, unknown> };
-				reportToolActivity(e.toolName, e.args);
-			}
-		});
 		const unsubscribeAgent = session.subscribeAgentEvents?.((event) => {
 			if (event.type === "tool_execution_start") {
 				reportToolActivity(event.toolName, event.args);
@@ -347,7 +341,6 @@ export class SubagentManager {
 			};
 		} finally {
 			cleanupAbortListener?.();
-			unsubscribeSession();
 			unsubscribeAgent?.();
 		}
 	}

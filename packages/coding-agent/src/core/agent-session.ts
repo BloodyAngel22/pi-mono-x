@@ -22,6 +22,7 @@ import type {
 	AgentMessage,
 	AgentState,
 	AgentTool,
+	AgentToolResult,
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@earendil-works/pi-ai";
@@ -1011,6 +1012,36 @@ export class AgentSession {
 
 	getToolDefinition(name: string): ToolDefinition | undefined {
 		return this._toolDefinitions.get(name)?.definition;
+	}
+
+	/**
+	 * Invoke a registered tool directly from extension context.
+	 * Direct invocation bypasses the model-driven permission prompt, so block known
+	 * destructive tools and only expose this for compositional/read-only workflows.
+	 */
+	async invokeTool(toolName: string, params: Record<string, unknown>): Promise<string> {
+		const blockedTools = new Set(["bash", "write", "edit", "edit_and_apply"]);
+		if (blockedTools.has(toolName)) {
+			throw new Error(`Direct invocation of destructive tool '${toolName}' is not allowed`);
+		}
+
+		const tool = this._toolRegistry.get(toolName);
+		if (!tool) {
+			throw new Error(`Tool not found: ${toolName}`);
+		}
+
+		const preparedParams = tool.prepareArguments ? tool.prepareArguments(params) : params;
+		const result = (await tool.execute(
+			`invoked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+			preparedParams as any,
+			this.agent.signal,
+			undefined,
+		)) as AgentToolResult<unknown>;
+
+		return result.content
+			.filter((content): content is TextContent => content.type === "text")
+			.map((content) => content.text)
+			.join("\n");
 	}
 
 	/**
@@ -2546,6 +2577,8 @@ export class AgentSession {
 					})();
 				},
 				getSystemPrompt: () => this.systemPrompt,
+				invokeTool: (toolName, params) => this.invokeTool(toolName, params),
+				getAllTools: () => this.getAllTools(),
 			},
 			{
 				registerProvider: (name, config) => {

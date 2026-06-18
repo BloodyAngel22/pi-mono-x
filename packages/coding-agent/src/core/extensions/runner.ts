@@ -240,6 +240,10 @@ export class ExtensionRunner {
 	private getContextUsageFn: () => ContextUsage | undefined = () => undefined;
 	private compactFn: (options?: CompactOptions) => void = () => {};
 	private getSystemPromptFn: () => string = () => "";
+	private invokeToolFn: (toolName: string, params: Record<string, unknown>) => Promise<string> = async (toolName) => {
+		throw new Error(`Tool invocation is not available in this context: ${toolName}`);
+	};
+	private getAllToolsFn: () => ReturnType<ExtensionActions["getAllTools"]> = () => [];
 	private newSessionHandler: NewSessionHandler = async () => ({ cancelled: false });
 	private forkHandler: ForkHandler = async () => ({ cancelled: false });
 	private navigateTreeHandler: NavigateTreeHandler = async () => ({ cancelled: false });
@@ -299,6 +303,8 @@ export class ExtensionRunner {
 		this.getContextUsageFn = contextActions.getContextUsage;
 		this.compactFn = contextActions.compact;
 		this.getSystemPromptFn = contextActions.getSystemPrompt;
+		this.invokeToolFn = contextActions.invokeTool;
+		this.getAllToolsFn = contextActions.getAllTools;
 
 		// Flush provider registrations queued during extension loading
 		for (const { name, config, extensionPath } of this.runtime.pendingProviderRegistrations) {
@@ -386,14 +392,18 @@ export class ExtensionRunner {
 	}
 
 	/** Get a tool definition by name. Returns undefined if not found. */
-	getToolDefinition(toolName: string): RegisteredTool["definition"] | undefined {
+	getRegisteredTool(toolName: string): RegisteredTool | undefined {
 		for (const ext of this.extensions) {
 			const tool = ext.tools.get(toolName);
 			if (tool) {
-				return tool.definition;
+				return tool;
 			}
 		}
 		return undefined;
+	}
+
+	getToolDefinition(toolName: string): RegisteredTool["definition"] | undefined {
+		return this.getRegisteredTool(toolName)?.definition;
 	}
 
 	getFlags(): Map<string, ExtensionFlag> {
@@ -631,6 +641,14 @@ export class ExtensionRunner {
 			getSystemPrompt: () => {
 				runner.assertActive();
 				return runner.getSystemPromptFn();
+			},
+			invokeTool: (toolName, params) => {
+				runner.assertActive();
+				return runner.invokeToolFn(toolName, params);
+			},
+			getAllTools: () => {
+				runner.assertActive();
+				return runner.getAllToolsFn();
 			},
 		};
 	}
