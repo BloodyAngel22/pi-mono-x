@@ -329,6 +329,24 @@ export class AgentSession {
 	/** Set by interactive mode to prompt the user when policy is "ask". */
 	permissionAsk: PermissionAskCallback | undefined;
 
+	/**
+	 * Static reference to the root session's permissionAsk callback.
+	 * Set by the RPC/interactive mode when the root session is registered.
+	 * Used by sub-agent sessions (created via the task tool) to propagate
+	 * permission prompts back to the user.
+	 */
+	private static _rootPermissionAsk: PermissionAskCallback | undefined;
+
+	/** Store the active session's permissionAsk so sub-sessions can reuse it. */
+	static setRootPermissionAsk(cb: PermissionAskCallback | undefined): void {
+		AgentSession._rootPermissionAsk = cb;
+	}
+
+	/** Retrieve the root session's permissionAsk, if any. */
+	static getRootPermissionAsk(): PermissionAskCallback | undefined {
+		return AgentSession._rootPermissionAsk;
+	}
+
 	// Plan mode
 	readonly planMode = new PlanMode();
 
@@ -1016,8 +1034,13 @@ export class AgentSession {
 
 	/**
 	 * Invoke a registered tool directly from extension context.
-	 * Direct invocation bypasses the model-driven permission prompt, so block known
-	 * destructive tools and only expose this for compositional/read-only workflows.
+	 *
+	 * Destructive tools (bash, write, edit, edit_and_apply) are blocked outright.
+	 * For all other tools, the user's permission policies are respected:
+	 * - "allow" → tool executes immediately
+	 * - "deny"  → throws with the denial reason
+	 * - "ask"   → emits an extension_ui_request to the frontend; execution
+	 *             waits for the user to Allow or Deny via the permissions UI
 	 */
 	async invokeTool(toolName: string, params: Record<string, unknown>): Promise<string> {
 		const blockedTools = new Set(["bash", "write", "edit", "edit_and_apply"]);
@@ -1028,6 +1051,12 @@ export class AgentSession {
 		const tool = this._toolRegistry.get(toolName);
 		if (!tool) {
 			throw new Error(`Tool not found: ${toolName}`);
+		}
+
+		// Permission check — respects user-configured allow/ask/deny policies
+		const permBlock = await this._checkToolPermission(toolName, params);
+		if (permBlock) {
+			throw new Error(permBlock.reason);
 		}
 
 		const preparedParams = tool.prepareArguments ? tool.prepareArguments(params) : params;

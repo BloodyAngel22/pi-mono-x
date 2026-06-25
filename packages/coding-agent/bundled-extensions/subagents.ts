@@ -6,6 +6,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import {
+	AgentSession,
 	createAgentSession,
 	createExtensionRuntime,
 	getGlobalSubagentManager,
@@ -123,6 +124,14 @@ export default function (pi: ExtensionAPI): void {
 				model: opts.model,
 				modelRegistry: currentCtx?.modelRegistry,
 			});
+
+			// Wire permissionAsk so sub-agent tool calls respect user's permission policies.
+			// Uses the root session's permissionAsk callback (which in RPC mode emits
+			// extension_ui_request with method:"permission" to the frontend).
+			const rootPermissionAsk = AgentSession.getRootPermissionAsk();
+			if (rootPermissionAsk) {
+				session.permissionAsk = rootPermissionAsk;
+			}
 
 			return {
 				prompt: (text: string) => session.prompt(text),

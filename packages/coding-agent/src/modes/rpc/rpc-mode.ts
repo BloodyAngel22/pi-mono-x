@@ -16,7 +16,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { completeSimple, type Message } from "@earendil-works/pi-ai";
-import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.js";
+import { AgentSession, type AgentSessionEvent } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "../../core/auth-guidance.js";
 import { fastContextSearch } from "../../core/context-search.js";
@@ -482,6 +482,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					return { decision: "deny-once" as const };
 				},
 			);
+
+		// Store the permissionAsk on the static root reference so sub-agent
+		// sessions created by the task tool can reuse it for their own
+		// permission prompts.
+		AgentSession.setRootPermissionAsk(target.permissionAsk);
 
 		// Set up event routing first so MCP status events reach the frontend
 		// during async initialization (subscribe before bindExtensions resolves).
