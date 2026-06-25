@@ -951,6 +951,61 @@ describe("edit tool fuzzy matching", () => {
 
 		expect(readFileSync(testFile, "utf-8")).toBe("console.log('world');\nhello universe\n");
 	});
+
+	it("should match oldText with spaces against file with tabs", async () => {
+		const testFile = join(testDir, "fuzzy-tabs.txt");
+		writeFileSync(testFile, "line1\n\tindented\nline3\n");
+
+		// oldText uses 4 spaces, file uses literal tab
+		const result = await editTool.execute("test-fuzzy-tabs-1", {
+			path: testFile,
+			edits: [{ oldText: "    indented", newText: "  replaced" }],
+		});
+
+		expect(getTextOutput(result)).toContain("Successfully replaced");
+		expect(readFileSync(testFile, "utf-8")).toContain("  replaced");
+	});
+
+	it("should match oldText with tabs against file with spaces", async () => {
+		const testFile = join(testDir, "fuzzy-tabs-2.txt");
+		writeFileSync(testFile, "line1\n    indented\nline3\n");
+
+		// oldText uses tab, file uses 4 spaces
+		const result = await editTool.execute("test-fuzzy-tabs-2", {
+			path: testFile,
+			edits: [{ oldText: "\tindented", newText: "\treplaced" }],
+		});
+
+		expect(getTextOutput(result)).toContain("Successfully replaced");
+		expect(readFileSync(testFile, "utf-8")).toContain("\treplaced");
+	});
+
+	it("should include file context in error when text is not found", async () => {
+		const testFile = join(testDir, "fuzzy-context-error.txt");
+		writeFileSync(testFile, "abc\ndef\nghi\n");
+
+		await expect(
+			editTool.execute("test-fuzzy-context", {
+				path: testFile,
+				edits: [{ oldText: "xyz", newText: "replacement" }],
+			}),
+		).rejects.toThrow(/Looking for/);
+	});
+
+	it("should include edit index in multi-edit error with context", async () => {
+		const testFile = join(testDir, "fuzzy-multi-error.txt");
+		writeFileSync(testFile, "alpha\nbeta\ngamma\n");
+
+		await expect(
+			editTool.execute("test-fuzzy-multi-err", {
+				path: testFile,
+				edits: [
+					{ oldText: "alpha\n", newText: "ALPHA\n" },
+					{ oldText: "missing\n", newText: "MISSING\n" },
+				],
+			}),
+		).rejects.toThrow(/edits\[1\][\s\S]*Looking for/);
+	});
 });
 
 describe("edit tool CRLF handling", () => {

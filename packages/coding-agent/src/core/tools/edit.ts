@@ -329,6 +329,8 @@ export function createEditToolDefinition(
 			"When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
 			"Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
 			"Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
+			"Before editing, re-read the file with the read tool to get the current content — do not rely on a prior read output, as the file may have changed or the previous read may have been truncated.",
+			"If the read tool shows a truncation notice (e.g. '[Showing lines 1-2000...]'), continue reading the rest of the file with offset before attempting edits.",
 		],
 		parameters: editSchema,
 		renderShell: "self",

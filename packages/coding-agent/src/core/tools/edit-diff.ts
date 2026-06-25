@@ -27,6 +27,7 @@ export function restoreLineEndings(text: string, ending: "\r\n" | "\n"): string 
 /**
  * Normalize text for fuzzy matching. Applies progressive transformations:
  * - Strip trailing whitespace from each line
+ * - Normalize tabs to 4 spaces (most common code indentation width)
  * - Normalize smart quotes to ASCII equivalents
  * - Normalize Unicode dashes/hyphens to ASCII hyphen
  * - Normalize special Unicode spaces to regular space
@@ -39,6 +40,8 @@ export function normalizeForFuzzyMatch(text: string): string {
 			.split("\n")
 			.map((line) => line.trimEnd())
 			.join("\n")
+			// Tabs → 4 spaces
+			.replace(/\t/g, "    ")
 			// Smart single quotes → '
 			.replace(/[\u2018\u2019\u201A\u201B]/g, "'")
 			// Smart double quotes → "
@@ -144,15 +147,91 @@ function countOccurrences(content: string, oldText: string): number {
 	return fuzzyContent.split(fuzzyOldText).length - 1;
 }
 
-function getNotFoundError(path: string, editIndex: number, totalEdits: number): Error {
-	if (totalEdits === 1) {
-		return new Error(
-			`Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.`,
-		);
+/** Build a readable snippet from `content` near the first line that resembles `oldText`. */
+export function buildNotFoundSnippet(content: string, oldText: string): string {
+	const contentLines = content.split("\n");
+	const oldLines = oldText.split("\n");
+
+	// Take the first non-empty line of oldText as a search anchor
+	const anchor = oldLines.find((l) => l.trim().length > 0);
+	if (!anchor) {
+		// oldText is all whitespace/empty — show the first few lines of the file
+		const head = contentLines
+			.slice(0, 6)
+			.map((l, i) => `  ${i + 1}: ${l}`)
+			.join("\n");
+		return `File starts with:\n${head}`;
 	}
-	return new Error(
-		`Could not find edits[${editIndex}] in ${path}. The oldText must match exactly including all whitespace and newlines.`,
-	);
+
+	const anchorTrimmed = anchor.trim();
+	// Find a line in content that shares significant overlap with the anchor
+	let bestLine = -1;
+	let bestScore = 0;
+	const anchorWords = new Set(anchorTrimmed.split(/\s+/).filter((w) => w.length > 2));
+	for (let i = 0; i < contentLines.length; i++) {
+		const line = contentLines[i];
+		const trimmed = line.trim();
+		if (trimmed.length > 0 && (trimmed.includes(anchorTrimmed) || anchorTrimmed.includes(trimmed))) {
+			bestLine = i;
+			bestScore = 999;
+			break;
+		}
+		// Word-overlap score
+		if (anchorWords.size > 0) {
+			const lineWords = new Set(trimmed.split(/\s+/).filter((w) => w.length > 2));
+			let overlap = 0;
+			for (const w of anchorWords) {
+				if (lineWords.has(w)) overlap++;
+			}
+			if (overlap > bestScore) {
+				bestScore = overlap;
+				bestLine = i;
+			}
+		}
+	}
+
+	if (bestLine < 0) {
+		// No resemblance at all — just show start of file
+		const head = contentLines
+			.slice(0, 6)
+			.map((l, i) => `  ${i + 1}: ${l}`)
+			.join("\n");
+		return `File starts with:\n${head}`;
+	}
+
+	const start = Math.max(0, bestLine - 2);
+	const end = Math.min(contentLines.length, bestLine + 3);
+	const snippet = contentLines
+		.slice(start, end)
+		.map((l, i) => `  ${start + i + 1}: ${l}`)
+		.join("\n");
+	const note =
+		bestScore < 999 ? `(closest match by word overlap at line ${bestLine + 1})` : `(near line ${bestLine + 1})`;
+	return `${note}\n${snippet}`;
+}
+
+function getNotFoundError(
+	path: string,
+	editIndex: number,
+	totalEdits: number,
+	content?: string,
+	oldText?: string,
+): Error {
+	const header =
+		totalEdits === 1
+			? `Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.`
+			: `Could not find edits[${editIndex}] in ${path}. The oldText must match exactly including all whitespace and newlines.`;
+
+	let detail = "";
+	if (oldText) {
+		const preview = oldText.length > 120 ? `${oldText.slice(0, 120)}...` : oldText;
+		detail += `\nLooking for (first 120 chars): ${JSON.stringify(preview)}`;
+	}
+	if (content && oldText) {
+		detail += `\n${buildNotFoundSnippet(content, oldText)}`;
+	}
+
+	return new Error(header + detail);
 }
 
 function getDuplicateError(path: string, editIndex: number, totalEdits: number, occurrences: number): Error {
@@ -216,7 +295,7 @@ export function applyEditsToNormalizedContent(
 		const edit = normalizedEdits[i];
 		const matchResult = fuzzyFindText(baseContent, edit.oldText);
 		if (!matchResult.found) {
-			throw getNotFoundError(path, i, normalizedEdits.length);
+			throw getNotFoundError(path, i, normalizedEdits.length, baseContent, edit.oldText);
 		}
 
 		const occurrences = countOccurrences(baseContent, edit.oldText);
