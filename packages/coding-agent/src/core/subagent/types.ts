@@ -1,5 +1,6 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../extensions/types.js";
+import type { PermissionAskCallback } from "../permissions.js";
 
 // ============================================================================
 // Task lifecycle
@@ -55,6 +56,8 @@ export interface SubagentRunOptions {
 	parentMcpTools?: ToolDefinition[];
 	/** Override model. When absent the parent model is used. */
 	model?: Model<any>;
+	/** Parent session permission prompt callback, scoped to the tab that launched this sub-agent. */
+	permissionAsk?: PermissionAskCallback;
 	/** Timeout in ms. Default: 5 minutes. */
 	timeout?: number;
 	signal?: AbortSignal;

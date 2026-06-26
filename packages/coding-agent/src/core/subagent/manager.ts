@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../extensions/types.js";
+import type { PermissionAskCallback } from "../permissions.js";
 import type {
 	SubagentEvent,
 	SubagentEventListener,
@@ -49,6 +50,7 @@ export type SubagentSessionFactory = (options: {
 	tools: string[];
 	customTools?: ToolDefinition[];
 	model?: Model<any>;
+	permissionAsk?: PermissionAskCallback;
 }) => Promise<{
 	prompt(text: string): Promise<void>;
 	getMessages(): Array<{
@@ -245,6 +247,7 @@ export class SubagentManager {
 			tools: toolNames,
 			customTools: customTools.length > 0 ? customTools : undefined,
 			model: options.model,
+			permissionAsk: options.permissionAsk,
 		});
 
 		const reportToolActivity = (toolName: string | undefined, args: Record<string, unknown> | undefined) => {

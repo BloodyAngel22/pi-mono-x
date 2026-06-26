@@ -16,7 +16,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { completeSimple, type Message } from "@earendil-works/pi-ai";
-import { AgentSession, type AgentSessionEvent } from "../../core/agent-session.js";
+import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "../../core/auth-guidance.js";
 import { fastContextSearch } from "../../core/context-search.js";
@@ -483,20 +483,20 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				},
 			);
 
-		// Store the permissionAsk on the static root reference so sub-agent
-		// sessions created by the task tool can reuse it for their own
-		// permission prompts.
-		AgentSession.setRootPermissionAsk(target.permissionAsk);
-
 		// Set up event routing first so MCP status events reach the frontend
 		// during async initialization (subscribe before bindExtensions resolves).
 		subscribeSession(sessionId, target);
 
 		// Fire extension binding without awaiting — session switch/fork returns
 		// immediately; MCPs initialize in the background.
+		const uiContext = createExtensionUIContext(sessionId);
+		// Private bridge for bundled extensions that need to create child sessions
+		// from the current tab/session (for example the task sub-agent tool).
+		(uiContext as any).__permissionAsk = target.permissionAsk;
+
 		void target
 			.bindExtensions({
-				uiContext: createExtensionUIContext(sessionId),
+				uiContext,
 				commandContextActions: {
 					waitForIdle: () => target.agent.waitForIdle(),
 					newSession: async (options) => runtimeHost.newSession(options),

@@ -326,26 +326,8 @@ export class AgentSession {
 	// Permission system
 	private _permissionsManager: PermissionsManager | null = null;
 	private _yoloPermissionsEnabled = false;
-	/** Set by interactive mode to prompt the user when policy is "ask". */
+	/** Set by interactive/RPC mode to prompt the user when policy is "ask". */
 	permissionAsk: PermissionAskCallback | undefined;
-
-	/**
-	 * Static reference to the root session's permissionAsk callback.
-	 * Set by the RPC/interactive mode when the root session is registered.
-	 * Used by sub-agent sessions (created via the task tool) to propagate
-	 * permission prompts back to the user.
-	 */
-	private static _rootPermissionAsk: PermissionAskCallback | undefined;
-
-	/** Store the active session's permissionAsk so sub-sessions can reuse it. */
-	static setRootPermissionAsk(cb: PermissionAskCallback | undefined): void {
-		AgentSession._rootPermissionAsk = cb;
-	}
-
-	/** Retrieve the root session's permissionAsk, if any. */
-	static getRootPermissionAsk(): PermissionAskCallback | undefined {
-		return AgentSession._rootPermissionAsk;
-	}
 
 	// Plan mode
 	readonly planMode = new PlanMode();

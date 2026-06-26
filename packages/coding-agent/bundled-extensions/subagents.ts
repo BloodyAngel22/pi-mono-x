@@ -6,7 +6,6 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import {
-	AgentSession,
 	createAgentSession,
 	createExtensionRuntime,
 	getGlobalSubagentManager,
@@ -125,12 +124,9 @@ export default function (pi: ExtensionAPI): void {
 				modelRegistry: currentCtx?.modelRegistry,
 			});
 
-			// Wire permissionAsk so sub-agent tool calls respect user's permission policies.
-			// Uses the root session's permissionAsk callback (which in RPC mode emits
-			// extension_ui_request with method:"permission" to the frontend).
-			const rootPermissionAsk = AgentSession.getRootPermissionAsk();
-			if (rootPermissionAsk) {
-				session.permissionAsk = rootPermissionAsk;
+			// Wire permissionAsk from the exact parent session/tab that launched this task.
+			if (opts.permissionAsk) {
+				session.permissionAsk = opts.permissionAsk;
 			}
 
 			return {
@@ -299,6 +295,7 @@ export default function (pi: ExtensionAPI): void {
 		execute: async (_toolCallId: string, params: any, signal: AbortSignal | undefined, onUpdate: any, ctx: any) => {
 			const mgr = getManager();
 			const cwd: string = ctx?.cwd ?? process.cwd();
+			const permissionAsk = ctx?.ui?.__permissionAsk;
 
 			let agentConfig: SubagentConfig | undefined;
 			if (params.agent) {
@@ -323,8 +320,9 @@ export default function (pi: ExtensionAPI): void {
 					agent: agentConfig,
 					parentMcpTools: mcpToolDefs.length > 0 ? mcpToolDefs : undefined,
 					model: ctx?.model,
+					permissionAsk,
 					signal,
-						onProgress: (activity: string) => {
+					onProgress: (activity: string) => {
 						activities.push(activity);
 						const recent = activities.slice(-5);
 						onUpdate?.({
