@@ -13,6 +13,17 @@ import type {
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_CONCURRENT_TASKS = 3;
 const MAX_RECENT_ACTIVITIES = 5;
+const MAX_PARTIAL_RESULT_CHARS = 6000;
+const MAX_PARTIAL_TOOL_SNIPPET_CHARS = 1200;
+
+function compactWhitespace(text: string): string {
+	return text.replace(/\s+/g, " ").trim();
+}
+
+function truncateText(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
 
 function formatToolActivity(toolName: string, args: Record<string, unknown>): string {
 	switch (toolName) {
@@ -44,6 +55,16 @@ function formatToolActivity(toolName: string, args: Record<string, unknown>): st
  * settings, and a NullResourceLoader. This avoids circular imports between
  * the subagent module and sdk.ts.
  */
+export type SubagentSessionMessage = {
+	role: string;
+	content?: Array<{ type: string; text?: string }>;
+	usage?: { input: number; output: number };
+	stopReason?: string;
+	errorMessage?: string;
+	toolName?: string;
+	isError?: boolean;
+};
+
 export type SubagentSessionFactory = (options: {
 	cwd: string;
 	systemPrompt: string;
@@ -53,13 +74,7 @@ export type SubagentSessionFactory = (options: {
 	permissionAsk?: PermissionAskCallback;
 }) => Promise<{
 	prompt(text: string): Promise<void>;
-	getMessages(): Array<{
-		role: string;
-		content?: Array<{ type: string; text?: string }>;
-		usage?: { input: number; output: number };
-		stopReason?: string;
-		errorMessage?: string;
-	}>;
+	getMessages(): SubagentSessionMessage[];
 	subscribe(listener: (event: { type: string; text?: string }) => void): () => void;
 	subscribeAgentEvents?(
 		listener: (event: { type: string; toolName?: string; args?: Record<string, unknown> }) => void,
@@ -289,6 +304,34 @@ export class SubagentManager {
 			return reason === "Sub-agent timed out";
 		};
 
+		const buildCollectedToolOutput = (messages: ReturnType<typeof session.getMessages>): string => {
+			const sections: string[] = [];
+
+			if (task.recentActivities?.length) {
+				sections.push(
+					["Recent sub-agent activity:", ...task.recentActivities.map((activity) => `- ${activity}`)].join("\n"),
+				);
+			}
+
+			const toolMessages = messages.filter((msg) => msg.role === "toolResult" && !msg.isError);
+			for (const msg of toolMessages.slice(-6)) {
+				const text = (msg.content ?? [])
+					.filter((content) => content.type === "text" && content.text)
+					.map((content) => content.text ?? "")
+					.join("\n")
+					.trim();
+				if (!text) continue;
+
+				const toolName = msg.toolName ? ` from ${msg.toolName}` : "";
+				sections.push(
+					`Collected output${toolName}:\n${truncateText(compactWhitespace(text), MAX_PARTIAL_TOOL_SNIPPET_CHARS)}`,
+				);
+			}
+
+			if (sections.length === 0) return "";
+			return `Partial findings before timeout/cancellation. The sub-agent did not produce a final summary, so this is compacted from completed tool calls.\n\n${truncateText(sections.join("\n\n"), MAX_PARTIAL_RESULT_CHARS)}`;
+		};
+
 		const buildResultFromMessages = (interrupted = false): SubagentResult | undefined => {
 			const messages = session.getMessages();
 			let inputTokens = 0;
@@ -309,7 +352,9 @@ export class SubagentManager {
 				}
 			}
 
-			const trimmedText = resultText.trim();
+			const assistantText = resultText.trim();
+			const fallbackText = interrupted && !assistantText ? buildCollectedToolOutput(messages) : "";
+			const trimmedText = assistantText || fallbackText.trim();
 			if (!trimmedText) return undefined;
 
 			const summaryTokens = Math.ceil(trimmedText.length / 4);

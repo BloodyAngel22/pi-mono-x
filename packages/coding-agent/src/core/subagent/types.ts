@@ -73,9 +73,9 @@ export interface SubagentResult {
 	inputTokens: number;
 	outputTokens: number;
 	savedTokens: number;
-	/** true if the sub-agent timed out but returned partial output. */
+	/** true if the sub-agent timed out but returned partial output, possibly compacted from completed tool calls. */
 	timedOut?: boolean;
-	/** true if the sub-agent was interrupted but returned partial output. */
+	/** true if the sub-agent was interrupted but returned partial output, possibly compacted from completed tool calls. */
 	interrupted?: boolean;
 }
 

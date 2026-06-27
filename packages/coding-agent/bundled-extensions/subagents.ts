@@ -141,6 +141,8 @@ export default function (pi: ExtensionAPI): void {
 						usage: m.usage,
 						stopReason: m.stopReason,
 						errorMessage: m.errorMessage,
+						toolName: m.toolName,
+						isError: m.isError,
 					})),
 				subscribe: (listener: (event: { type: string; text?: string }) => void) =>
 					session.subscribe((event: any) => listener(event)),
