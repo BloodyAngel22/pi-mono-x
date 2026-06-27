@@ -7,7 +7,7 @@
 
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
-import type { SessionStats } from "../../core/agent-session.js";
+import type { AgentPresetConfig, SessionStats } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import type { FastContextResult } from "../../core/context-search.js";
@@ -63,6 +63,10 @@ export type RpcCommand =
 		// Queue modes
 		| { id?: string; type: "set_steering_mode"; mode: "all" | "one-at-a-time" }
 		| { id?: string; type: "set_follow_up_mode"; mode: "all" | "one-at-a-time" }
+
+		// Agent presets
+		| { id?: string; type: "load_agent_preset"; presetName: string }
+		| { id?: string; type: "set_custom_instructions"; instructions: string }
 
 		// Compaction
 		| { id?: string; type: "compact"; customInstructions?: string }
@@ -267,6 +271,10 @@ export type RpcResponse =
 	// Queue modes
 	| { id?: string; type: "response"; command: "set_steering_mode"; success: true }
 	| { id?: string; type: "response"; command: "set_follow_up_mode"; success: true }
+
+	// Agent presets
+	| { id?: string; type: "response"; command: "load_agent_preset"; success: true; data: AgentPresetConfig }
+	| { id?: string; type: "response"; command: "set_custom_instructions"; success: true }
 
 	// Compaction
 	| { id?: string; type: "response"; command: "compact"; success: true; data: CompactionResult }

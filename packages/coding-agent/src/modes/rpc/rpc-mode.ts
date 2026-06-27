@@ -16,7 +16,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { completeSimple, type Message } from "@earendil-works/pi-ai";
-import type { AgentSession, AgentSessionEvent } from "../../core/agent-session.js";
+import { getAgentDir } from "../../config.js";
+import type { AgentPresetConfig, AgentSession, AgentSessionEvent } from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "../../core/auth-guidance.js";
 import { fastContextSearch } from "../../core/context-search.js";
@@ -112,6 +113,23 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	const shortPath = (p: string): string => {
 		const h = os.homedir();
 		return p.startsWith(h) ? `~${p.slice(h.length)}` : p;
+	};
+
+	const presetPath = (name: string): string => {
+		const fileName = `${path.basename(name).replace(/\.json$/i, "")}.json`;
+		return path.join(getAgentDir(), "agents", fileName);
+	};
+
+	const readAgentPreset = (name: string): AgentPresetConfig => {
+		const file = presetPath(name);
+		if (!fs.existsSync(file)) {
+			throw new Error(`Agent preset not found: ${name}`);
+		}
+		const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as AgentPresetConfig;
+		if (!parsed || typeof parsed.name !== "string" || !parsed.name.trim()) {
+			throw new Error(`Invalid agent preset: ${name}`);
+		}
+		return parsed;
 	};
 
 	const listDir = (dir: string): string => {
@@ -932,6 +950,21 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "set_follow_up_mode": {
 				session.setFollowUpMode(command.mode);
 				return success(id, "set_follow_up_mode");
+			}
+
+			// =================================================================
+			// Agent Presets
+			// =================================================================
+
+			case "load_agent_preset": {
+				const preset = readAgentPreset(command.presetName);
+				await session.applyPreset(preset);
+				return success(id, "load_agent_preset", preset);
+			}
+
+			case "set_custom_instructions": {
+				session.setCustomInstructions(command.instructions);
+				return success(id, "set_custom_instructions");
 			}
 
 			// =================================================================

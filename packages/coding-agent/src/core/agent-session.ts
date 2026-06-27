@@ -85,7 +85,13 @@ import { type HookEventName, runHooks } from "./hooks.js";
 import { type MarkdownCommand, matchMarkdownCommand } from "./markdown-commands.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
-import { generalizeBashPermissionMatch, type PermissionAskCallback, PermissionsManager } from "./permissions.js";
+import {
+	generalizeBashPermissionMatch,
+	type PermissionAskCallback,
+	PermissionsManager,
+	type PolicyType,
+	type PolicyValue,
+} from "./permissions.js";
 import { PlanMode } from "./plan-mode.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
@@ -240,6 +246,39 @@ export interface SessionStats {
 	contextUsage?: ContextUsage;
 }
 
+export type AgentPresetPermissionMode = "allow" | "read-only" | "deny";
+export type AgentPresetMcpMode = "allow-all" | "deny-all";
+
+export interface AgentPresetConfig {
+	name: string;
+	description?: string;
+	model?: {
+		provider?: string;
+		modelId?: string;
+		id?: string;
+	};
+	thinkingLevel?: ThinkingLevel;
+	systemPrompt?: string;
+	permissions?: {
+		bash?: AgentPresetPermissionMode;
+		files?: AgentPresetPermissionMode;
+	};
+	mcpPermissions?: {
+		mode?: AgentPresetMcpMode;
+	};
+	autoRetry?: boolean;
+	autoCompaction?: boolean;
+	steeringMode?: "all" | "one-at-a-time";
+	followUpMode?: "all" | "one-at-a-time";
+	projectCwd?: string | null;
+}
+
+interface AgentPresetPermissionModes {
+	bash?: AgentPresetPermissionMode;
+	files?: AgentPresetPermissionMode;
+	mcp?: AgentPresetMcpMode;
+}
+
 interface ToolDefinitionEntry {
 	definition: ToolDefinition;
 	sourceInfo: SourceInfo;
@@ -335,6 +374,7 @@ export class AgentSession {
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
+	private _customInstructions = "";
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -1178,6 +1218,12 @@ export class AgentSession {
 		return Array.from(unique);
 	}
 
+	private _withCustomInstructions(systemPrompt: string): string {
+		const instructions = this._customInstructions.trim();
+		if (!instructions) return systemPrompt;
+		return `${systemPrompt}\n\n# Agent preset custom instructions\n\n${instructions}`;
+	}
+
 	private _rebuildSystemPrompt(toolNames: string[]): string {
 		const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
 		const toolSnippets: Record<string, string> = {};
@@ -1211,7 +1257,7 @@ export class AgentSession {
 			toolSnippets,
 			promptGuidelines,
 		};
-		return buildSystemPrompt(this._baseSystemPromptOptions);
+		return this._withCustomInstructions(buildSystemPrompt(this._baseSystemPromptOptions));
 	}
 
 	// =========================================================================
@@ -1933,6 +1979,130 @@ export class AgentSession {
 	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
 		this.agent.followUpMode = mode;
 		this.settingsManager.setFollowUpMode(mode);
+	}
+
+	/**
+	 * Set session-level custom instructions appended to the base system prompt.
+	 * Changes take effect immediately and on subsequent turns.
+	 */
+	setCustomInstructions(instructions: string): void {
+		this._customInstructions = instructions;
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.state.systemPrompt = this._baseSystemPrompt;
+	}
+
+	private _addPresetPermissionRule(type: PolicyType, match: string, policy: PolicyValue): void {
+		this._permissionsManager?.addRule({ type, match, policy }, "session");
+	}
+
+	private _applyPresetPermissions(modes: AgentPresetPermissionModes): void {
+		if (modes.bash === "allow") {
+			this._addPresetPermissionRule("bash", "*", "allow");
+		} else if (modes.bash === "deny") {
+			this._addPresetPermissionRule("bash", "*", "deny");
+		} else if (modes.bash === "read-only") {
+			for (const pattern of [
+				"ls *",
+				"cat *",
+				"grep *",
+				"rg *",
+				"find *",
+				"head *",
+				"tail *",
+				"pwd",
+				"pwd *",
+				"wc *",
+				"file *",
+				"stat *",
+				"du *",
+				"df *",
+				"sort *",
+				"uniq *",
+				"cut *",
+				"awk *",
+				"sed *",
+				"tr *",
+				"less *",
+				"bat *",
+				"fd *",
+				"tree *",
+				"which *",
+				"type *",
+				"env",
+				"env *",
+				"printenv",
+				"printenv *",
+			]) {
+				this._addPresetPermissionRule("bash", pattern, "allow");
+			}
+			for (const pattern of [
+				"rm *",
+				"mv *",
+				"cp *",
+				"mkdir *",
+				"touch *",
+				"chmod *",
+				"chown *",
+				"sudo *",
+				"apt *",
+				"apt-get *",
+				"dnf *",
+				"yum *",
+				"pacman *",
+				"git add *",
+				"git commit *",
+				"git push *",
+				"git reset *",
+				"git checkout *",
+				"git switch *",
+				"npm *",
+				"pnpm *",
+				"yarn *",
+				"bun *",
+				"cargo *",
+				"make *",
+				"docker *",
+			]) {
+				this._addPresetPermissionRule("bash", pattern, "deny");
+			}
+		}
+
+		if (modes.files === "allow") {
+			this._addPresetPermissionRule("file", "*", "allow");
+		} else if (modes.files === "deny" || modes.files === "read-only") {
+			this._addPresetPermissionRule("file", "*", "deny");
+		}
+
+		if (modes.mcp === "allow-all") {
+			this._addPresetPermissionRule("mcp", "*", "allow");
+		} else if (modes.mcp === "deny-all") {
+			this._addPresetPermissionRule("mcp", "*", "deny");
+		}
+	}
+
+	/** Apply a named agent preset to the current session. */
+	async applyPreset(config: AgentPresetConfig): Promise<void> {
+		if (config.model?.provider && (config.model.modelId || config.model.id)) {
+			const modelId = config.model.modelId ?? config.model.id;
+			const models = await this._modelRegistry.getAvailable();
+			const model = models.find((m) => m.provider === config.model?.provider && m.id === modelId);
+			if (!model) {
+				throw new Error(`Model not found: ${config.model.provider}/${modelId}`);
+			}
+			await this.setModel(model);
+		}
+		if (config.thinkingLevel) this.setThinkingLevel(config.thinkingLevel);
+		if (config.steeringMode) this.setSteeringMode(config.steeringMode);
+		if (config.followUpMode) this.setFollowUpMode(config.followUpMode);
+		if (config.autoRetry !== undefined) this.setAutoRetryEnabled(config.autoRetry);
+		if (config.autoCompaction !== undefined) this.setAutoCompactionEnabled(config.autoCompaction);
+		this._permissionsManager?.clearSessionRules();
+		this._applyPresetPermissions({
+			bash: config.permissions?.bash,
+			files: config.permissions?.files,
+			mcp: config.mcpPermissions?.mode,
+		});
+		if (config.systemPrompt !== undefined) this.setCustomInstructions(config.systemPrompt);
 	}
 
 	// =========================================================================

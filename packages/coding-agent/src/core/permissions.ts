@@ -472,6 +472,11 @@ export class PermissionsManager {
 		return null;
 	}
 
+	/** Clear all in-memory session-scoped permission rules. */
+	clearSessionRules(): void {
+		this._session = {};
+	}
+
 	/**
 	 * Add a rule and persist to disk (or store in-memory for session scope).
 	 * @param scope "global" saves to ~/.pi/agent/permissions.json; "local" saves to <cwd>/.pi/permissions.json; "session" keeps in memory only
