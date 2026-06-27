@@ -150,6 +150,8 @@ export class SubagentManager {
 			task.outputTokens = result.outputTokens;
 			task.savedTokens = result.savedTokens;
 			task.result = result.text;
+			task.timedOut = result.timedOut;
+			task.interrupted = result.interrupted;
 
 			this._emit({ type: "task_complete", task: { ...task } });
 			return result;
@@ -281,6 +283,58 @@ export class SubagentManager {
 
 		let cleanupAbortListener: (() => void) | undefined;
 
+		const isTimeoutAbort = (): boolean => {
+			const reason = signal.reason;
+			if (reason instanceof Error) return reason.message === "Sub-agent timed out";
+			return reason === "Sub-agent timed out";
+		};
+
+		const buildResultFromMessages = (interrupted = false): SubagentResult | undefined => {
+			const messages = session.getMessages();
+			let inputTokens = 0;
+			let outputTokens = 0;
+
+			for (const msg of messages) {
+				if (msg.role === "assistant" && msg.usage) {
+					inputTokens += msg.usage.input;
+					outputTokens += msg.usage.output;
+				}
+			}
+
+			const lastAssistant = [...messages].reverse().find((msg) => msg.role === "assistant");
+			let resultText = "";
+			for (const content of lastAssistant?.content ?? []) {
+				if (content.type === "text" && content.text) {
+					resultText += content.text;
+				}
+			}
+
+			const trimmedText = resultText.trim();
+			if (!trimmedText) return undefined;
+
+			const summaryTokens = Math.ceil(trimmedText.length / 4);
+			const savedTokens = Math.max(0, inputTokens + outputTokens - summaryTokens);
+
+			const wasInterrupted = interrupted || lastAssistant?.stopReason === "aborted";
+			const timedOut = wasInterrupted && isTimeoutAbort();
+
+			return {
+				text: trimmedText,
+				inputTokens,
+				outputTokens,
+				savedTokens,
+				interrupted: wasInterrupted || undefined,
+				timedOut: timedOut || undefined,
+			};
+		};
+
+		const waitForPromptSettle = async (promptPromise: Promise<void>): Promise<void> => {
+			await Promise.race([
+				promptPromise.catch(() => undefined),
+				new Promise<void>((resolve) => setTimeout(resolve, 100)),
+			]);
+		};
+
 		try {
 			if (signal.aborted) {
 				abortPrompt();
@@ -303,45 +357,38 @@ export class SubagentManager {
 				cleanupAbortListener = () => signal.removeEventListener("abort", onAbort);
 			});
 
-			await Promise.race([session.prompt(options.instructions), abortPromise]);
+			const promptPromise = session.prompt(options.instructions);
+
+			try {
+				await Promise.race([promptPromise, abortPromise]);
+			} catch (err: unknown) {
+				if (!signal.aborted) throw err;
+
+				await waitForPromptSettle(promptPromise);
+				const partialResult = buildResultFromMessages(true);
+				if (partialResult) return partialResult;
+
+				throw err;
+			}
 
 			const messages = session.getMessages();
-			let resultText = "";
-			let inputTokens = 0;
-			let outputTokens = 0;
+			const lastAssistant = [...messages].reverse().find((msg) => msg.role === "assistant");
+			const result = buildResultFromMessages(lastAssistant?.stopReason === "aborted");
 
-			for (const msg of messages) {
-				if (msg.role === "assistant" && msg.usage) {
-					inputTokens += msg.usage.input;
-					outputTokens += msg.usage.output;
-				}
+			if (lastAssistant?.stopReason === "error") {
+				throw new Error(lastAssistant.errorMessage || "Sub-agent error");
 			}
 
-			const lastMessage = messages[messages.length - 1];
-			if (lastMessage?.role === "assistant") {
-				if (lastMessage.stopReason === "error" || lastMessage.stopReason === "aborted") {
-					throw new Error(lastMessage.errorMessage || `Sub-agent ${lastMessage.stopReason}`);
-				}
-				for (const content of lastMessage.content ?? []) {
-					if (content.type === "text" && content.text) {
-						resultText += content.text;
-					}
-				}
+			if (lastAssistant?.stopReason === "aborted") {
+				if (result) return result;
+				throw new Error(lastAssistant.errorMessage || "Sub-agent aborted");
 			}
 
-			if (!resultText) {
+			if (!result) {
 				throw new Error("Sub-agent produced no text output");
 			}
 
-			const summaryTokens = Math.ceil(resultText.length / 4);
-			const savedTokens = Math.max(0, inputTokens + outputTokens - summaryTokens);
-
-			return {
-				text: resultText.trim(),
-				inputTokens,
-				outputTokens,
-				savedTokens,
-			};
+			return result;
 		} finally {
 			cleanupAbortListener?.();
 			unsubscribeAgent?.();

@@ -20,6 +20,10 @@ export interface SubagentTask {
 	savedTokens: number;
 	result?: string;
 	error?: string;
+	/** true if the task ended due to timeout but produced a partial result. */
+	timedOut?: boolean;
+	/** true if the task ended due to timeout/cancellation but produced a partial result. */
+	interrupted?: boolean;
 	/** Last 5 human-readable activity descriptions (newest last). */
 	recentActivities?: string[];
 }
@@ -69,6 +73,10 @@ export interface SubagentResult {
 	inputTokens: number;
 	outputTokens: number;
 	savedTokens: number;
+	/** true if the sub-agent timed out but returned partial output. */
+	timedOut?: boolean;
+	/** true if the sub-agent was interrupted but returned partial output. */
+	interrupted?: boolean;
 }
 
 // ============================================================================

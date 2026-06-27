@@ -28,6 +28,8 @@ const HEAVY_PATTERNS: RegExp[] = [
 
 type TaskToolDetails = {
 	activities?: string[];
+	timedOut?: boolean;
+	interrupted?: boolean;
 };
 
 function buildGuidance(agents: SubagentConfig[]): string {
@@ -161,7 +163,7 @@ export default function (pi: ExtensionAPI): void {
 					const elapsed = Math.floor(((t.completedAt ?? Date.now()) - t.startedAt) / 1000);
 					const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m${elapsed % 60}s`;
 					const dot =
-						t.status === "done" ? "\u25cf done" : t.status === "error" ? "\u25cf err" : "\u25cf";
+						t.status === "done" ? (t.interrupted ? "\u25cf partial" : "\u25cf done") : t.status === "error" ? "\u25cf err" : "\u25cf";
 					const lastActivity = t.recentActivities?.length ? ` (${t.recentActivities[t.recentActivities.length - 1]})` : "";
 					return `${dot} ${t.label}${lastActivity} (${elapsedStr})`;
 				})
@@ -332,14 +334,23 @@ export default function (pi: ExtensionAPI): void {
 					},
 				});
 
+				const partialPrefix = result.timedOut
+					? "[timeout — partial result]"
+					: result.interrupted
+						? "[interrupted — partial result]"
+						: undefined;
+				const outputText = partialPrefix ? `${partialPrefix}\n${result.text}` : result.text;
+
 				return {
-					content: [{ type: "text" as const, text: result.text }],
+					content: [{ type: "text" as const, text: outputText }],
 					details: {
 						description: params.description,
 						cwd,
 						inputTokens: result.inputTokens,
 						outputTokens: result.outputTokens,
 						savedTokens: result.savedTokens,
+						timedOut: result.timedOut,
+						interrupted: result.interrupted,
 						activities: activities.slice(-5),
 					},
 				};
@@ -421,7 +432,7 @@ export default function (pi: ExtensionAPI): void {
 								task.status === "running" || task.status === "background" ? "warning" :
 								task.status === "error" ? "error" : "muted";
 
-							const statusText = `[${task.status}]`;
+							const statusText = task.interrupted ? "[partial]" : `[${task.status}]`;
 							const info = ` ${statusText} ${task.label} (${elapsed})`;
 							const padding = Math.max(0, availWidth - 3 - info.length);
 							lines.push(borderFg("|") + " " + theme.fg(statusColor as any, info) + " ".repeat(padding) + borderFg("|"));
