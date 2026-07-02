@@ -27,6 +27,7 @@ import type {
 	ExtensionWidgetOptions,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.js";
+import { emitSessionShutdownEvent } from "../../core/extensions/runner.js";
 import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
 import { createAgentSession } from "../../core/sdk.js";
 import { SessionManager } from "../../core/session-manager.js";
@@ -704,6 +705,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 			const wasActive = activeSessionId === targetSessionId;
 			unsubscribeSession(targetSessionId);
+			// Give extensions (e.g. bundled MCP) a chance to close their child
+			// processes/handles before the session is torn down — without this,
+			// MCP server processes spawned for this session leak for the
+			// lifetime of the `pi --mode rpc` process.
+			await emitSessionShutdownEvent(targetSession.extensionRunner, { type: "session_shutdown", reason: "close" });
 			targetSession.dispose();
 			sessions.delete(targetSessionId);
 			if (wasActive) {

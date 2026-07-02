@@ -3,11 +3,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolResultSchema, ListToolsResultSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 
 interface McpServerConfig {
   type?: "local" | "remote";
@@ -30,6 +31,8 @@ type McpServerStatus = {
   nextRetryAt?: number;
 };
 
+type LogFn = (msg: string, ...args: any[]) => void;
+
 const SOFT_STARTUP_TIMEOUT_MS = 5000;
 const INITIAL_RETRY_DELAY_MS = 5000;
 const MAX_RETRY_DELAY_MS = 60000;
@@ -38,14 +41,221 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function configHash(cfg: McpServerConfig): string {
+  const stable = JSON.stringify(cfg, Object.keys(cfg).sort());
+  return createHash("sha1").update(stable).digest("hex").slice(0, 16);
+}
+
+// ---------------------------------------------------------------------------
+// Process-wide MCP client sharing.
+//
+// This extension module is re-executed for every session (extensions load
+// through a fresh, non-caching jiti instance per session — see
+// core/extensions/loader.ts), so ordinary module-scoped state does NOT
+// survive across sessions/tabs. To actually share spawned MCP server
+// processes across concurrently open tabs within one `pi --mode rpc`
+// process, the registry lives on `globalThis` (keyed by a global symbol so
+// it survives re-execution of this module), refcounted per server so a
+// server process is only spawned once per distinct config and only closed
+// once the last tab using it goes away.
+// ---------------------------------------------------------------------------
+
+interface SharedMcpEntry {
+  name: string;
+  configHash: string;
+  refCount: number;
+  client: Client | null;
+  tools: Tool[] | null;
+  status: McpServerStatus;
+  /** Bumped on every (re)connect attempt/teardown; lets an in-flight retry loop notice it's been superseded or abandoned. */
+  generation: number;
+  statusListeners: Set<() => void>;
+}
+
+const REGISTRY_KEY = Symbol.for("pi-mono-x.mcp.sharedClients.v1");
+
+function getRegistry(): Map<string, SharedMcpEntry> {
+  const g = globalThis as unknown as Record<symbol, Map<string, SharedMcpEntry> | undefined>;
+  if (!g[REGISTRY_KEY]) g[REGISTRY_KEY] = new Map();
+  return g[REGISTRY_KEY] as Map<string, SharedMcpEntry>;
+}
+
+function notifyStatus(entry: SharedMcpEntry): void {
+  for (const listener of entry.statusListeners) listener();
+}
+
+async function connectServer(name: string, serverConfig: McpServerConfig, log: LogFn): Promise<{ client: Client; tools: Tool[] }> {
+  let client: Client;
+  if (serverConfig.type === "remote" || serverConfig.url) {
+    if (!serverConfig.url) throw new Error("URL is required for remote MCP server");
+
+    const headers: Record<string, string> = { "Accept": "application/json, text/event-stream" };
+    if (serverConfig.headers) {
+      for (const [key, value] of Object.entries(serverConfig.headers)) {
+        if (typeof value === "string" && value.startsWith("{env:") && value.endsWith("}")) {
+          headers[key] = process.env[value.substring(5, value.length - 1)] || "";
+        } else {
+          headers[key] = String(value);
+        }
+      }
+    }
+
+    log(`Connecting to remote: ${serverConfig.url}`, { headers: Object.keys(headers) });
+    let connected = false;
+    let activeClient = new Client({ name: "pi-mcp-extension", version: "1.0.0" }, { capabilities: {} });
+
+    try {
+      await activeClient.connect(new StreamableHTTPClientTransport(new URL(serverConfig.url), { requestInit: { headers } }));
+      connected = true;
+      log(`Connected via Streamable HTTP: ${name}`);
+    } catch (streamableErr: any) {
+      log(`Streamable HTTP failed for ${name}, falling back to SSE`, streamableErr);
+    }
+
+    if (!connected) {
+      activeClient = new Client({ name: "pi-mcp-extension", version: "1.0.0" }, { capabilities: {} });
+      await activeClient.connect(new SSEClientTransport(new URL(serverConfig.url), {
+        eventSourceInit: {
+          fetch: (url, init) => globalThis.fetch(url as string, {
+            ...(init as RequestInit),
+            headers: { ...headers, ...((init?.headers as Record<string, string>) || {}) }
+          })
+        },
+        requestInit: { headers }
+      }));
+      log(`Connected via SSE: ${name}`);
+    }
+
+    client = activeClient;
+  } else {
+    if (!serverConfig.command) throw new Error("Command is required for local MCP server");
+    log(`Starting local stdio: ${serverConfig.command}`, { args: serverConfig.args });
+    const localTransport = new StdioClientTransport({
+      command: serverConfig.command,
+      args: serverConfig.args,
+      env: { ...process.env, ...serverConfig.env },
+      stderr: "ignore"
+    });
+    client = new Client({ name: "pi-mcp-extension", version: "1.0.0" }, { capabilities: {} });
+    await client.connect(localTransport);
+  }
+
+  const toolsResponse = await client.request({ method: "tools/list" }, ListToolsResultSchema);
+  return { client, tools: toolsResponse.tools };
+}
+
+function startConnectLoop(key: string, entry: SharedMcpEntry, serverConfig: McpServerConfig, log: LogFn): void {
+  const myGeneration = ++entry.generation;
+  const attempt = async (attemptNo: number, delay: number): Promise<void> => {
+    const registry = getRegistry();
+    if (registry.get(key) !== entry || entry.generation !== myGeneration) return; // superseded or torn down
+    entry.status = { status: attemptNo === 1 ? "connecting" : "retrying", attempt: attemptNo };
+    notifyStatus(entry);
+    try {
+      const { client, tools } = await connectServer(entry.name, serverConfig, log);
+      if (registry.get(key) !== entry || entry.generation !== myGeneration) {
+        // Every subscriber left while we were connecting — don't leak the process.
+        void client.close().catch(() => {});
+        return;
+      }
+      entry.client = client;
+      entry.tools = tools;
+      entry.status = { status: "connected", attempt: attemptNo };
+      log(`Registered ${tools.length} tools from ${entry.name} (shared)`);
+      notifyStatus(entry);
+    } catch (error: any) {
+      const message = error?.message || String(error);
+      log(`Failed to start server ${entry.name}`, error);
+      if (registry.get(key) !== entry || entry.generation !== myGeneration) return;
+      const nextRetryAt = Date.now() + delay;
+      entry.status = { status: "retrying", error: message, attempt: attemptNo, nextRetryAt };
+      notifyStatus(entry);
+      await sleep(delay);
+      if (registry.get(key) !== entry || entry.generation !== myGeneration) return;
+      await attempt(attemptNo + 1, Math.min(delay * 2, MAX_RETRY_DELAY_MS));
+    }
+  };
+  void attempt(1, INITIAL_RETRY_DELAY_MS);
+}
+
+/**
+ * Acquire a reference to the shared MCP client for `name`/`serverConfig`,
+ * starting it (with retry/backoff) if nobody else has it running yet.
+ * Returns the registry key actually used — normally `name`, but if a
+ * differently-configured entry for the same name is already live (e.g. the
+ * on-disk config changed between sessions), a private, non-shared entry is
+ * used instead so two different configs never get mixed under one client.
+ */
+function acquireSharedServer(name: string, serverConfig: McpServerConfig, log: LogFn, onStatusChange: () => void): string {
+  const registry = getRegistry();
+  const hash = configHash(serverConfig);
+  let key = name;
+  let entry = registry.get(key);
+  if (entry && entry.configHash !== hash) {
+    key = `${name}::${hash}`;
+    entry = registry.get(key);
+  }
+  if (!entry) {
+    entry = {
+      name,
+      configHash: hash,
+      refCount: 0,
+      client: null,
+      tools: null,
+      status: { status: "connecting" },
+      generation: 0,
+      statusListeners: new Set(),
+    };
+    registry.set(key, entry);
+  }
+  entry.refCount++;
+  entry.statusListeners.add(onStatusChange);
+  if (!entry.client && entry.generation === 0) {
+    startConnectLoop(key, entry, serverConfig, log);
+  }
+  return key;
+}
+
+function releaseSharedServer(key: string, onStatusChange: () => void): void {
+  const registry = getRegistry();
+  const entry = registry.get(key);
+  if (!entry) return;
+  entry.statusListeners.delete(onStatusChange);
+  entry.refCount--;
+  if (entry.refCount <= 0) {
+    entry.generation++; // abandon any in-flight connect/retry loop
+    registry.delete(key);
+    if (entry.client) void entry.client.close().catch(() => {});
+  }
+}
+
+async function forceReconnectSharedServer(name: string, key: string, serverConfig: McpServerConfig, log: LogFn): Promise<{ client: Client; tools: Tool[] }> {
+  const registry = getRegistry();
+  const existing = registry.get(key);
+  if (existing?.client) {
+    const old = existing.client;
+    existing.client = null;
+    void old.close().catch(() => {});
+  }
+  const { client, tools } = await connectServer(name, serverConfig, log);
+  const entry = registry.get(key);
+  if (entry) {
+    entry.client = client;
+    entry.tools = tools;
+    entry.status = { status: "connected" };
+    notifyStatus(entry);
+  }
+  return { client, tools };
+}
+
 export default async function (pi: ExtensionAPI): Promise<void> {
   const mcpDir = path.join(homedir(), ".pi", "agent", "mcp");
   const configPath = path.join(homedir(), ".pi", "agent", "mcp-config.json");
   const logPath = path.join(mcpDir, "mcp.log");
-  
+
   if (!fs.existsSync(mcpDir)) fs.mkdirSync(mcpDir, { recursive: true });
 
-  const log = (msg: string, ...args: any[]) => {
+  const log: LogFn = (msg, ...args) => {
     const timestamp = new Date().toISOString();
     const formattedMsg = `[${timestamp}] ${msg} ${args.length ? JSON.stringify(args) : ""}\n`;
     fs.appendFileSync(logPath, formattedMsg);
@@ -68,17 +278,18 @@ export default async function (pi: ExtensionAPI): Promise<void> {
   }
 
   const config: McpConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  const clients: Map<string, Client> = new Map();
-  const serverStatus: Map<string, McpServerStatus> = new Map();
-  let sessionGeneration = 0;
 
-  for (const [name, cfg] of Object.entries(config.mcpServers)) {
-    if (!cfg.disabled) serverStatus.set(name, { status: "connecting" });
-  }
+  // Registry keys this session instance currently holds a reference on
+  // (name -> registry key, which may differ from name — see acquireSharedServer).
+  let acquiredKeys: Map<string, string> = new Map();
+  let onStatusChangeRef: () => void = () => {};
 
   const updateStatus = (ctx: ExtensionContext, total: number): void => {
     if (!ctx.hasUI) return;
-    const statuses = [...serverStatus.values()];
+    const registry = getRegistry();
+    const statuses = [...acquiredKeys.values()]
+      .map((key) => registry.get(key)?.status)
+      .filter((s): s is McpServerStatus => Boolean(s));
     const ready = statuses.filter((s) => s.status === "connected").length;
     const active = statuses.filter((s) => s.status === "connecting" || s.status === "retrying").length;
     if (ready === total) {
@@ -90,15 +301,17 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     }
   };
 
-  pi.on("session_start", async (event, ctx) => {
-    const myGeneration = ++sessionGeneration;
-    log(`Session start: initializing servers (generation ${myGeneration})`);
+  const releaseAll = () => {
+    for (const key of acquiredKeys.values()) releaseSharedServer(key, onStatusChangeRef);
+    acquiredKeys = new Map();
+  };
 
-    // Close clients from previous session_start if any
-    if (clients.size > 0) {
-      void Promise.allSettled([...clients.values()].map((c) => c.close().catch(() => {})));
-      clients.clear();
-    }
+  pi.on("session_start", async (event, ctx) => {
+    log("Session start: attaching to shared MCP servers");
+
+    // A repeated session_start on the same instance (e.g. ctx.reload())
+    // — release whatever we held before re-acquiring.
+    releaseAll();
 
     const serverEntries = Object.entries(config.mcpServers).filter(([, cfg]) => !cfg.disabled);
     const total = serverEntries.length;
@@ -108,72 +321,13 @@ export default async function (pi: ExtensionAPI): Promise<void> {
       return;
     }
 
-    const initServer = async (name: string, serverConfig: McpServerConfig, attempt: number): Promise<void> => {
-      log(`Initializing server: ${name} (attempt ${attempt})`);
-      serverStatus.set(name, { status: "connecting", attempt });
-      updateStatus(ctx, total);
-
-      let client: Client;
-      if (serverConfig.type === "remote" || serverConfig.url) {
-        if (!serverConfig.url) throw new Error("URL is required for remote MCP server");
-
-        const headers: Record<string, string> = { "Accept": "application/json, text/event-stream" };
-        if (serverConfig.headers) {
-          for (const [key, value] of Object.entries(serverConfig.headers)) {
-            if (typeof value === "string" && value.startsWith("{env:") && value.endsWith("}")) {
-              headers[key] = process.env[value.substring(5, value.length - 1)] || "";
-            } else {
-              headers[key] = String(value);
-            }
-          }
-        }
-
-        log(`Connecting to remote: ${serverConfig.url}`, { headers: Object.keys(headers) });
-        let connected = false;
-        let activeClient = new Client({ name: "pi-mcp-extension", version: "1.0.0" }, { capabilities: {} });
-
-        try {
-          await activeClient.connect(new StreamableHTTPClientTransport(new URL(serverConfig.url), { requestInit: { headers } }));
-          connected = true;
-          log(`Connected via Streamable HTTP: ${name}`);
-        } catch (streamableErr: any) {
-          log(`Streamable HTTP failed for ${name}, falling back to SSE`, streamableErr);
-        }
-
-        if (!connected) {
-          activeClient = new Client({ name: "pi-mcp-extension", version: "1.0.0" }, { capabilities: {} });
-          await activeClient.connect(new SSEClientTransport(new URL(serverConfig.url), {
-            eventSourceInit: {
-              fetch: (url, init) => globalThis.fetch(url as string, {
-                ...(init as RequestInit),
-                headers: { ...headers, ...((init?.headers as Record<string, string>) || {}) }
-              })
-            },
-            requestInit: { headers }
-          }));
-          log(`Connected via SSE: ${name}`);
-        }
-
-        client = activeClient;
-      } else {
-        if (!serverConfig.command) throw new Error("Command is required for local MCP server");
-        log(`Starting local stdio: ${serverConfig.command}`, { args: serverConfig.args });
-        const localTransport = new StdioClientTransport({
-          command: serverConfig.command,
-          args: serverConfig.args,
-          env: { ...process.env, ...serverConfig.env },
-          stderr: "ignore"
-        });
-        client = new Client({ name: "pi-mcp-extension", version: "1.0.0" }, { capabilities: {} });
-        await client.connect(localTransport);
-      }
-
-      clients.set(name, client);
-
-      const toolsResponse = await client.request({ method: "tools/list" }, ListToolsResultSchema);
-      log(`Registered ${toolsResponse.tools.length} tools from ${name}`);
-
-      for (const tool of toolsResponse.tools) {
+    const registeredServers = new Set<string>();
+    const registerToolsFor = (name: string, key: string) => {
+      if (registeredServers.has(name)) return;
+      const entry = getRegistry().get(key);
+      if (!entry?.tools) return;
+      registeredServers.add(name);
+      for (const tool of entry.tools) {
         const piToolName = `${name}_${tool.name}`.replace(/[^a-zA-Z0-9_]/g, "_");
         pi.registerTool({
           name: piToolName,
@@ -181,6 +335,10 @@ export default async function (pi: ExtensionAPI): Promise<void> {
           description: tool.description || `MCP tool from ${name}`,
           parameters: tool.inputSchema as any,
           execute: async (toolCallId, params) => {
+            // Resolved at call time (not captured at registration) so a
+            // /mcpauth reconnect elsewhere is picked up automatically.
+            const client = getRegistry().get(key)?.client;
+            if (!client) throw new Error(`${name} is not connected`);
             log(`Calling tool ${name}.${tool.name}`, params);
             try {
               const result = await client.request(
@@ -202,46 +360,30 @@ export default async function (pi: ExtensionAPI): Promise<void> {
           }
         });
       }
-      serverStatus.set(name, { status: "connected", attempt });
-      updateStatus(ctx, total);
     };
 
-    const startServerWithRetry = async (name: string, serverConfig: McpServerConfig): Promise<void> => {
-      let attempt = 1;
-      let delay = INITIAL_RETRY_DELAY_MS;
-      while (myGeneration === sessionGeneration) {
-        try {
-          await initServer(name, serverConfig, attempt);
-          return;
-        } catch (error: any) {
-          const message = error?.message || String(error);
-          log(`Failed to start server ${name}`, error);
-          const nextRetryAt = Date.now() + delay;
-          serverStatus.set(name, { status: "retrying", error: message, attempt, nextRetryAt });
-          updateStatus(ctx, total);
-          if (attempt === 1 && ctx.hasUI) ctx.ui.notify(`MCP: ${name} unavailable, retrying in background`, "warning");
-          await sleep(delay);
-          attempt++;
-          delay = Math.min(delay * 2, MAX_RETRY_DELAY_MS);
-        }
+    const allReady = new Promise<void>((resolve) => {
+      const checkDone = () => {
+        if ([...acquiredKeys.keys()].every((n) => registeredServers.has(n))) resolve();
+      };
+      onStatusChangeRef = () => {
+        updateStatus(ctx, total);
+        for (const [name, key] of acquiredKeys) registerToolsFor(name, key);
+        checkDone();
+      };
+      for (const [name, serverConfig] of serverEntries) {
+        const key = acquireSharedServer(name, serverConfig, log, onStatusChangeRef);
+        acquiredKeys.set(name, key);
       }
-    };
+      // Servers already running for another tab are ready immediately.
+      for (const [name, key] of acquiredKeys) registerToolsFor(name, key);
+      updateStatus(ctx, total);
+      checkDone();
+    });
 
-    for (const [name] of serverEntries) {
-      serverStatus.set(name, { status: "connecting", attempt: 1 });
-    }
-    updateStatus(ctx, total);
-
-    const startupTasks = serverEntries.map(([name, serverConfig]) =>
-      startServerWithRetry(name, serverConfig).catch((error) => {
-        log(`Unexpected MCP background task failure for ${name}`, error);
-      }),
-    );
-
-    await Promise.race([Promise.allSettled(startupTasks), sleep(SOFT_STARTUP_TIMEOUT_MS)]);
-
-    if (myGeneration !== sessionGeneration) return;
-    updateStatus(ctx, total);
+    // Soft timeout — don't block session start on a slow/retrying server,
+    // same as before; it'll finish attaching in the background.
+    await Promise.race([allReady, sleep(SOFT_STARTUP_TIMEOUT_MS)]);
   });
 
   pi.registerCommand("mcps", {
@@ -255,13 +397,17 @@ export default async function (pi: ExtensionAPI): Promise<void> {
             const lines: string[] = [];
             const borderFg = (s: string) => theme.fg("border", s);
             const borderLine = (left: string, mid: string, right: string) => borderFg(left + mid + right);
+            const registry = getRegistry();
+            const statusEntries: Array<[string, McpServerStatus]> = [...acquiredKeys.entries()].map(
+              ([name, key]) => [name, registry.get(key)?.status ?? { status: "connecting" as const }],
+            );
 
             lines.push(borderLine("┌", "─".repeat(availWidth - 2), "┐"));
             const title = " MCP Servers Status ";
             lines.push(borderFg("│") + theme.fg("accent", title) + " ".repeat(Math.max(0, availWidth - 2 - title.length)) + borderFg("│"));
             lines.push(borderLine("├", "─".repeat(availWidth - 2), "┤"));
 
-            for (const [name, info] of serverStatus.entries()) {
+            for (const [name, info] of statusEntries) {
               const statusColor = info.status === "connected" ? "success" : (info.status === "error" ? "error" : "warning");
               const statusText = info.status.toUpperCase();
               const namePart = ` • ${name}: `;
@@ -369,30 +515,14 @@ export default async function (pi: ExtensionAPI): Promise<void> {
             log(`Auth succeeded for ${serverName}, reconnecting...`);
 
             try {
-              const oldClient = clients.get(serverName);
-              if (oldClient) {
-                try { await oldClient.close(); } catch (_) {}
-                clients.delete(serverName);
-              }
+              // Reconnect the SHARED entry — every tab currently using this
+              // server picks up the freshly authenticated client on its
+              // next tool call (see registerToolsFor's execute lookup).
+              const key = acquiredKeys.get(serverName) ?? serverName;
+              const { tools } = await forceReconnectSharedServer(serverName, key, serverConfig, log);
 
-              const transport = new StdioClientTransport({
-                command: serverConfig.command!,
-                args: serverConfig.args,
-                env: { ...process.env, ...serverConfig.env },
-                stderr: "ignore",
-              });
-              const newClient = new Client(
-                { name: "pi-mcp-extension", version: "1.0.0" },
-                { capabilities: {} }
-              );
-              await newClient.connect(transport);
-
-              const toolsResponse = await newClient.request(
-                { method: "tools/list" },
-                ListToolsResultSchema
-              );
-
-              for (const tool of toolsResponse.tools) {
+              // Re-register tools for THIS session in case names/schemas changed.
+              for (const tool of tools) {
                 const piToolName = `${serverName}_${tool.name}`.replace(/[^a-zA-Z0-9_]/g, "_");
                 pi.registerTool({
                   name: piToolName,
@@ -400,7 +530,9 @@ export default async function (pi: ExtensionAPI): Promise<void> {
                   description: tool.description || `MCP tool from ${serverName}`,
                   parameters: tool.inputSchema as any,
                   execute: async (toolCallId: any, params: any) => {
-                    const result = await newClient.request(
+                    const client = getRegistry().get(key)?.client;
+                    if (!client) throw new Error(`${serverName} is not connected`);
+                    const result = await client.request(
                       { method: "tools/call", params: { name: tool.name, arguments: params } },
                       CallToolResultSchema
                     );
@@ -416,12 +548,9 @@ export default async function (pi: ExtensionAPI): Promise<void> {
                 });
               }
 
-              clients.set(serverName, newClient);
-              serverStatus.set(serverName, { status: "connected" });
-              log(`Reconnected ${serverName}: ${toolsResponse.tools.length} tools`);
-              ctx.ui.notify(`${serverName}: reconnected (${toolsResponse.tools.length} tools)`, "info");
+              log(`Reconnected ${serverName}: ${tools.length} tools`);
+              ctx.ui.notify(`${serverName}: reconnected (${tools.length} tools)`, "info");
             } catch (err: any) {
-              serverStatus.set(serverName, { status: "error", error: err.message });
               log(`Reconnect failed for ${serverName}`, err);
               ctx.ui.notify(`${serverName}: auth ok but reconnect failed — ${err.message}`, "error");
             }
@@ -437,9 +566,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
   });
 
   pi.on("session_shutdown", async () => {
-    sessionGeneration++;
-    log("Session shutdown: closing clients");
-    await Promise.allSettled([...clients.values()].map((c) => c.close()));
-    clients.clear();
+    log("Session shutdown: releasing shared MCP servers");
+    releaseAll();
   });
 }
