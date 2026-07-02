@@ -9,7 +9,7 @@ import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 const fastContextSchema = Type.Object({
 	query: Type.String({ description: "What to find in the current codebase" }),
 	path: Type.Optional(
-		Type.String({ description: "Reserved for future scoped search; currently searches the project cwd" }),
+		Type.String({ description: "Optional subdirectory (relative to the project root) to scope the search to" }),
 	),
 	maxFiles: Type.Optional(Type.Number({ description: "Maximum relevant files to return (default: 12)" })),
 	includeSnippets: Type.Optional(
@@ -51,11 +51,11 @@ export function createFastContextToolDefinition(
 		],
 		parameters: fastContextSchema,
 		executionMode: "parallel",
-		async execute(_toolCallId, { query, maxFiles, includeSnippets }, signal) {
+		async execute(_toolCallId, { query, path: scopePath, maxFiles, includeSnippets }, signal) {
 			const result = await fastContextSearch(
 				cwd,
 				query,
-				{ maxFiles, includeSnippets: includeSnippets ?? true },
+				{ maxFiles, includeSnippets: includeSnippets ?? true, path: scopePath },
 				signal,
 			);
 			return {

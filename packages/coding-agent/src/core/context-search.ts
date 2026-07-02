@@ -30,6 +30,7 @@ export interface FastContextOptions {
 	maxMatches?: number;
 	contextLines?: number;
 	includeSnippets?: boolean;
+	path?: string;
 }
 
 interface IndexedSymbol {
@@ -106,7 +107,6 @@ const MAX_INDEXED_BODY_CHARS = 64_000;
 const STRUCTURE_FILE_LIMIT = 5000;
 const BM25_K1 = 1.2;
 const BM25_B = 0.75;
-const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py"]);
 const TEXT_EXTENSIONS = new Set([
 	".ts",
 	".tsx",
@@ -219,6 +219,19 @@ function expandCamelCase(term: string): string[] {
 function addTermWithSubterms(terms: Set<string>, term: string): void {
 	addTerm(terms, term);
 	for (const part of expandCamelCase(term)) addTerm(terms, part);
+}
+
+const symbolSubtokenCache = new WeakMap<IndexedSymbol, Set<string>>();
+
+// Whole camelCase/snake_case subtokens only, so a term like "auth" doesn't get credit for
+// an arbitrary substring hit inside an unrelated symbol like "authorPage".
+function symbolSubtokens(symbol: IndexedSymbol): Set<string> {
+	const cached = symbolSubtokenCache.get(symbol);
+	if (cached) return cached;
+	const tokens = new Set<string>([symbol.name.toLowerCase()]);
+	for (const part of expandCamelCase(symbol.name)) tokens.add(part.toLowerCase());
+	symbolSubtokenCache.set(symbol, tokens);
+	return tokens;
 }
 
 function extractTerms(query: string): string[] {
@@ -606,7 +619,7 @@ async function listSourceFiles(cwd: string, signal?: AbortSignal): Promise<strin
 			while (idx >= 0) {
 				const line = buf.slice(0, idx).trim();
 				buf = buf.slice(idx + 1);
-				if (line && SOURCE_EXTENSIONS.has(path.extname(line).toLowerCase())) out.push(line);
+				if (line && TEXT_EXTENSIONS.has(path.extname(line).toLowerCase())) out.push(line);
 				if (out.length >= STRUCTURE_FILE_LIMIT) {
 					killed = true;
 					child.kill();
@@ -617,8 +630,7 @@ async function listSourceFiles(cwd: string, signal?: AbortSignal): Promise<strin
 		});
 		child.on("close", () => {
 			signal?.removeEventListener("abort", onAbort);
-			if (!killed && buf.trim() && SOURCE_EXTENSIONS.has(path.extname(buf.trim()).toLowerCase()))
-				out.push(buf.trim());
+			if (!killed && buf.trim() && TEXT_EXTENSIONS.has(path.extname(buf.trim()).toLowerCase())) out.push(buf.trim());
 			resolve(out.slice(0, STRUCTURE_FILE_LIMIT));
 		});
 		child.on("error", () => resolve(out));
@@ -879,41 +891,63 @@ export async function fastContextSearch(
 	const maxMatches = Math.max(maxFiles, options.maxMatches ?? DEFAULT_MAX_MATCHES);
 	const contextLines = Math.max(0, options.contextLines ?? DEFAULT_CONTEXT_LINES);
 	const terms = extractTerms(normalized);
+	const scopeRoot = options.path ? path.resolve(cwd, options.path) : cwd;
+	const safeScopeRoot = scopeRoot === cwd || scopeRoot.startsWith(cwd + path.sep) ? scopeRoot : cwd;
+	const scopePrefix = safeScopeRoot === cwd ? "" : `${relativeToCwd(cwd, safeScopeRoot)}/`;
 	const [matches, pathHits, structure] = await Promise.all([
-		runRg(cwd, terms.length ? terms : [normalized], maxMatches, signal).catch(() => []),
-		runFd(cwd, terms, maxFiles * 4, signal).catch(() => []),
+		runRg(safeScopeRoot, terms.length ? terms : [normalized], maxMatches, signal).catch(() => []),
+		runFd(safeScopeRoot, terms, maxFiles * 4, signal).catch(() => []),
 		getStructureIndex(cwd, signal).catch(() => undefined),
 	]);
 	const bm25Stats = structure?.bm25Stats;
 
 	const files = new Map<
 		string,
-		{ abs: string; score: number; terms: Set<string>; ranges: Array<{ start: number; end: number }> }
+		{
+			abs: string;
+			score: number;
+			terms: Set<string>;
+			queryTermsMatched: Set<string>;
+			ranges: Array<{ start: number; end: number }>;
+		}
 	>();
 	const ensure = (abs: string) => {
 		let item = files.get(abs);
 		if (!item) {
-			item = { abs, score: 0, terms: new Set(), ranges: [] };
+			item = { abs, score: 0, terms: new Set(), queryTermsMatched: new Set(), ranges: [] };
 			files.set(abs, item);
 		}
 		return item;
 	};
-	const addFileScore = (rel: string, score: number, reason: string, range?: { start: number; end: number }) => {
+	const addFileScore = (
+		rel: string,
+		score: number,
+		reason: string,
+		range?: { start: number; end: number },
+		matchedTerms?: string[],
+	) => {
 		const abs = path.resolve(cwd, rel);
 		const item = ensure(abs);
 		item.score += score + pathScore(rel) + fileNameBoost(rel, terms);
 		item.terms.add(reason);
+		if (matchedTerms) for (const term of matchedTerms) item.queryTermsMatched.add(term.toLowerCase());
 		if (range) item.ranges = mergeRange(item.ranges, range);
 		scoreCache.delete(abs);
 	};
 	const scoreCache = new Map<string, number>();
-	const scoreItem = (item: { abs: string; score: number }): number => {
+	const scoreItem = (item: { abs: string; score: number; queryTermsMatched: Set<string> }): number => {
 		const cachedScore = scoreCache.get(item.abs);
 		if (cachedScore !== undefined) return cachedScore;
 		const rel = relativeToCwd(cwd, item.abs);
-		const indexed = structure?.files.get(rel);
+		const inScope = !scopePrefix || rel.startsWith(scopePrefix);
+		const indexed = inScope ? structure?.files.get(rel) : undefined;
 		const bm25Score = indexed && bm25Stats ? bm25fScore(indexed, terms.length ? terms : [normalized], bm25Stats) : 0;
-		const score = item.score + bm25Score * 10 + pathScore(rel) + fileNameBoost(rel, terms);
+		// Reward files that match several distinct query terms over files that repeat a single term,
+		// capped well below the exact-symbol-match boost (+70) so it nudges rather than dominates ranking.
+		const coverage = item.queryTermsMatched.size;
+		const coverageBonus =
+			coverage >= 2 ? Math.min(40, (coverage - 1) * 8 * (coverage / Math.max(1, terms.length))) : 0;
+		const score = item.score + bm25Score * 10 + pathScore(rel) + fileNameBoost(rel, terms) + coverageBonus;
 		scoreCache.set(item.abs, score);
 		return score;
 	};
@@ -927,6 +961,7 @@ export async function fastContextSearch(
 		// exact path/symbol hits. Give the first hit a strong signal, then quickly saturate.
 		item.score += previousMatches === 0 ? 10 : previousMatches < 4 ? 2 : 0;
 		item.terms.add(match.term);
+		item.queryTermsMatched.add(match.term.toLowerCase());
 		item.ranges = mergeRange(item.ranges, {
 			start: Math.max(1, match.line - contextLines),
 			end: match.line + contextLines,
@@ -945,25 +980,43 @@ export async function fastContextSearch(
 		const rel = relativeToCwd(cwd, abs);
 		const item = ensure(abs);
 		item.score += 6 + pathScore(rel) + fileNameBoost(rel, terms);
-		for (const term of terms) if (rel.toLowerCase().includes(term.toLowerCase())) item.terms.add(term);
+		for (const term of terms)
+			if (rel.toLowerCase().includes(term.toLowerCase())) {
+				item.terms.add(term);
+				item.queryTermsMatched.add(term.toLowerCase());
+			}
 	}
 
 	if (structure) {
 		const loweredTerms = terms.map((t) => t.toLowerCase());
 		for (const symbol of structure.symbols) {
+			if (scopePrefix && !symbol.path.startsWith(scopePrefix)) continue;
 			const symbolName = symbol.name.toLowerCase();
+			const subtokens = symbolSubtokens(symbol);
 			let boost = 0;
+			const matchedTerms: string[] = [];
 			for (const term of loweredTerms) {
-				if (symbolName === term) boost += 70;
-				else if (symbolName.includes(term) || term.includes(symbolName)) boost += 30;
+				if (symbolName === term) {
+					boost += 70;
+					matchedTerms.push(term);
+				} else if (subtokens.has(term)) {
+					boost += 30;
+					matchedTerms.push(term);
+				}
 			}
 			if (boost <= 0) continue;
 			if (symbol.exported) boost += 8;
 			if (symbol.kind === "tool" || symbol.kind === "command") boost += 10;
-			addFileScore(symbol.path, boost, `symbol:${symbol.name}`, {
-				start: Math.max(1, symbol.startLine - 1),
-				end: symbol.endLine,
-			});
+			addFileScore(
+				symbol.path,
+				boost,
+				`symbol:${symbol.name}`,
+				{
+					start: Math.max(1, symbol.startLine - 1),
+					end: symbol.endLine,
+				},
+				matchedTerms,
+			);
 		}
 
 		const seeded = [...files.values()]

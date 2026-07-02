@@ -61,6 +61,63 @@ describe("fastContextSearch", () => {
 		expect(result.files[0]?.path).toBe("src/core/fast-context-target.ts");
 	});
 
+	it("ranks a file matching multiple distinct query terms above one repeating a single term", async () => {
+		writeProjectFile(
+			testDir,
+			"src/core/session-refresh.ts",
+			`export function refreshSessionToken(session: string, token: string): string {\n\treturn session + token;\n}\n`,
+		);
+		writeProjectFile(
+			testDir,
+			"src/misc/token-log.ts",
+			Array.from({ length: 10 }, () => "// token token token").join("\n"),
+		);
+
+		const result = await fastContextSearch(testDir, "refresh session token", {
+			maxFiles: 2,
+			includeSnippets: false,
+		});
+
+		expect(result.files[0]?.path).toBe("src/core/session-refresh.ts");
+	});
+
+	it("does not credit substring symbol matches across word boundaries", async () => {
+		writeProjectFile(
+			testDir,
+			"src/security/auth-login.ts",
+			`export function authLogin(token: string): boolean {\n\treturn token.length > 0;\n}\n`,
+		);
+		writeProjectFile(
+			testDir,
+			"src/misc/author-page.ts",
+			`export function authorPage(name: string): string {\n\treturn name;\n}\n`,
+		);
+
+		const result = await fastContextSearch(testDir, "auth", { maxFiles: 2, includeSnippets: false });
+
+		expect(result.files[0]?.path).toBe("src/security/auth-login.ts");
+		const authorMatch = result.files.find((file) => file.path === "src/misc/author-page.ts");
+		expect(authorMatch?.reason ?? "").not.toContain("symbol:authorPage");
+	});
+
+	it("scopes results to the given path", async () => {
+		writeProjectFile(
+			testDir,
+			"src/security/token.ts",
+			`export function issueToken(): string {\n\treturn "secure";\n}\n`,
+		);
+		writeProjectFile(testDir, "src/misc/token.ts", `export function issueToken(): string {\n\treturn "misc";\n}\n`);
+
+		const result = await fastContextSearch(testDir, "token", {
+			maxFiles: 5,
+			includeSnippets: false,
+			path: "src/security",
+		});
+
+		expect(result.files.map((file) => file.path)).toContain("src/security/token.ts");
+		expect(result.files.map((file) => file.path)).not.toContain("src/misc/token.ts");
+	});
+
 	it("reindexes changed files between searches", async () => {
 		const file = writeProjectFile(
 			testDir,

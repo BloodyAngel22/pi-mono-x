@@ -602,11 +602,15 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	// -----------------------------------------------------------------
 	// Fast Context / Fetch helpers
 	// -----------------------------------------------------------------
-	async function runFastContext(query: string) {
+	async function runFastContext(query: string, scopePath?: string) {
 		const ui = createExtensionUIContext(activeSessionId ?? undefined);
 		ui.setStatus("fast-context", "searching...");
 		try {
-			const result = await fastContextSearch(session.activeCwd, query, { maxFiles: 12, includeSnippets: false });
+			const result = await fastContextSearch(session.activeCwd, query, {
+				maxFiles: 12,
+				includeSnippets: false,
+				path: scopePath,
+			});
 			ui.setStatus("fast-context", `done: ${result.files.length} files`);
 			return result;
 		} catch (e) {
@@ -820,7 +824,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					return error(id, "fast_context", "Usage: fast_context <query>");
 				}
 				try {
-					const result = await runFastContext(query);
+					const result = await runFastContext(query, command.path);
 					return success(id, "fast_context", result);
 				} catch (e) {
 					return error(id, "fast_context", (e as Error).message);

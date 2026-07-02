@@ -33,7 +33,7 @@ export type RpcCommand =
 		| { id?: string; type: "steer"; message: string; images?: ImageContent[] }
 		| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
 		| { id?: string; type: "btw"; question: string }
-		| { id?: string; type: "fast_context"; query: string }
+		| { id?: string; type: "fast_context"; query: string; path?: string }
 		| {
 				id?: string;
 				type: "fast_fetch";
