@@ -21,7 +21,7 @@ interface DeepResearchParams {
 	timeBudgetMinutes?: number;
 	/** Number of pages fetched and summarized per search query. 0 = use search result snippets only. */
 	sourcesPerQuery?: number;
-	/** Search results requested from fast_fetch per query. */
+	/** Search results requested from web_search per query. */
 	searchResults?: number;
 	/** Global source cap across all iterations. */
 	maxSources?: number;
@@ -351,7 +351,7 @@ async function executeQuery(
 		content: [{ type: "text", text: `    ↳ searching: ${query.query}` }],
 		details: buildProgressDetails(state, "search", config, { currentQuery: query.query, currentStep: "search" }),
 	});
-	const searchText = await ctx.invokeTool("fast_fetch", {
+	const searchText = await ctx.invokeTool("web_search", {
 		query: query.query,
 		mode: "search",
 		maxResults: config.searchResults,
@@ -381,7 +381,7 @@ async function executeQuery(
 	const sourcePayloads = await Promise.all(
 		urls.map(async (url) => {
 			try {
-				const pageText = await ctx.invokeTool("fast_fetch", { query: url, mode: "url", timeoutMs: 20_000 });
+				const pageText = await ctx.invokeTool("web_search", { query: url, mode: "url", timeoutMs: 20_000 });
 				return { url, title: extractTitle(searchText, url), content: pageText };
 			} catch {
 				return null;
@@ -514,7 +514,7 @@ export default function (pi: ExtensionAPI): void {
 		label: "Deep Research",
 		description: [
 			"Run a bounded iterative research loop on a topic.",
-			"Uses fast_fetch for web search/page fetches, summarizes findings, identifies knowledge gaps,",
+			"Uses web_search for web search/page fetches, summarizes findings, identifies knowledge gaps,",
 			"and loops with refined queries before compiling a structured report.",
 			"Defaults are intentionally time-bounded; use mode=deep or larger budgets only when needed.",
 		].join(" "),
@@ -532,7 +532,7 @@ export default function (pi: ExtensionAPI): void {
 				breadth: { type: "number", description: "Search directions per iteration, 1-5. Defaults: quick=2, balanced=3, deep=4.", default: 3 },
 				timeBudgetMinutes: { type: "number", description: "Hard wall-clock budget. Defaults: quick=5, balanced=10, deep=20.", default: 10 },
 				sourcesPerQuery: { type: "number", description: "Pages fetched/summarized per query. 0 uses search snippets only. Defaults: quick=0, balanced=1, deep=2.", default: 1 },
-				searchResults: { type: "number", description: "Search results requested from fast_fetch per query. Default depends on mode." },
+				searchResults: { type: "number", description: "Search results requested from web_search per query. Default depends on mode." },
 				maxSources: { type: "number", description: "Global source cap across all iterations. Default depends on mode." },
 				context: { type: "string", description: "Optional prior context to avoid redundant searching." },
 				focus: { type: "string", description: "Optional focus areas, e.g. security, performance, cost." },

@@ -492,6 +492,45 @@ Response:
 {"type": "response", "command": "abort_bash", "success": true}
 ```
 
+### Web Search
+
+#### web_search
+
+Web search or direct URL fetch without MCP, using the built-in `web_search` tool (see `docs/settings.md` for the `webSearch.*` settings). Runs immediately and does not go through the conversation/turn loop.
+
+```json
+{"type": "web_search", "query": "pi coding agent", "mode": "search", "maxResults": 5, "timeoutMs": 20000}
+```
+
+- `query` (required): search query, or a URL when `mode` is `"url"` (or auto-detected).
+- `mode` (optional): `"search"` or `"url"`. Defaults to `"url"` if `query` looks like an `http(s)://` URL, otherwise `"search"`.
+- `maxResults` (optional): number of search results/snippets to keep (default from settings, `5`).
+- `timeoutMs` (optional): per-attempt request timeout in milliseconds (default from settings, `20000`).
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "web_search",
+  "success": true,
+  "data": {
+    "text": "web_search search 200 OK\nURL: https://html.duckduckgo.com/html/?q=pi+coding+agent\n\n...",
+    "details": {
+      "url": "https://html.duckduckgo.com/html/?q=pi+coding+agent",
+      "mode": "search",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "truncated": false,
+      "bytes": 8213,
+      "blocked": false,
+      "retries": 0
+    }
+  }
+}
+```
+
+If a bot-protection challenge (Cloudflare, Akamai, PerimeterX, DataDome, generic captcha) is detected, `details.blocked` is `true` and `details.challengeType` names the vendor; `data.text` contains a human-readable explanation instead of the raw challenge page. If `webSearch.headlessFallback` is enabled, `details.headlessAttempted`/`headlessUsed` indicate whether the headless-browser retry ran and succeeded.
+
 ### Session
 
 #### get_session_stats

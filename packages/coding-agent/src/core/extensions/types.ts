@@ -65,8 +65,6 @@ import type {
 	BashToolDetails,
 	BashToolInput,
 	EditToolInput,
-	FastFetchToolDetails,
-	FastFetchToolInput,
 	FindToolDetails,
 	FindToolInput,
 	GrepToolDetails,
@@ -75,6 +73,8 @@ import type {
 	LsToolInput,
 	ReadToolDetails,
 	ReadToolInput,
+	WebSearchToolDetails,
+	WebSearchToolInput,
 	WriteToolInput,
 } from "../tools/index.js";
 
@@ -339,7 +339,7 @@ export interface ExtensionContext {
 	/**
 	 * Invoke another registered tool by name from inside an extension tool/event handler.
 	 * Useful for composite tools such as deep_research that need direct access to
-	 * read-only tools (for example fast_fetch) without asking the model to perform
+	 * read-only tools (for example web_search) without asking the model to perform
 	 * a separate tool call.
 	 *
 	 * NOTE: direct invocation bypasses the normal model-driven permission prompt.
@@ -832,9 +832,9 @@ export interface LsToolCallEvent extends ToolCallEventBase {
 	input: LsToolInput;
 }
 
-export interface FastFetchToolCallEvent extends ToolCallEventBase {
-	toolName: "fast_fetch";
-	input: FastFetchToolInput;
+export interface WebSearchToolCallEvent extends ToolCallEventBase {
+	toolName: "web_search";
+	input: WebSearchToolInput;
 }
 
 export interface CustomToolCallEvent extends ToolCallEventBase {
@@ -856,7 +856,7 @@ export type ToolCallEvent =
 	| GrepToolCallEvent
 	| FindToolCallEvent
 	| LsToolCallEvent
-	| FastFetchToolCallEvent
+	| WebSearchToolCallEvent
 	| CustomToolCallEvent;
 
 interface ToolResultEventBase {
@@ -902,9 +902,9 @@ export interface LsToolResultEvent extends ToolResultEventBase {
 	details: LsToolDetails | undefined;
 }
 
-export interface FastFetchToolResultEvent extends ToolResultEventBase {
-	toolName: "fast_fetch";
-	details: FastFetchToolDetails | undefined;
+export interface WebSearchToolResultEvent extends ToolResultEventBase {
+	toolName: "web_search";
+	details: WebSearchToolDetails | undefined;
 }
 
 export interface CustomToolResultEvent extends ToolResultEventBase {
@@ -921,7 +921,7 @@ export type ToolResultEvent =
 	| GrepToolResultEvent
 	| FindToolResultEvent
 	| LsToolResultEvent
-	| FastFetchToolResultEvent
+	| WebSearchToolResultEvent
 	| CustomToolResultEvent;
 
 // Type guards for ToolResultEvent
@@ -946,8 +946,8 @@ export function isFindToolResult(e: ToolResultEvent): e is FindToolResultEvent {
 export function isLsToolResult(e: ToolResultEvent): e is LsToolResultEvent {
 	return e.toolName === "ls";
 }
-export function isFastFetchToolResult(e: ToolResultEvent): e is FastFetchToolResultEvent {
-	return e.toolName === "fast_fetch";
+export function isWebSearchToolResult(e: ToolResultEvent): e is WebSearchToolResultEvent {
+	return e.toolName === "web_search";
 }
 
 /**

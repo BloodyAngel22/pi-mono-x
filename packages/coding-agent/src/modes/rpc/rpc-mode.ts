@@ -33,7 +33,7 @@ import { createAgentSession } from "../../core/sdk.js";
 import { SessionManager } from "../../core/session-manager.js";
 import { scoreSkillsByRelevance } from "../../core/skills.js";
 import { getGlobalSubagentManager } from "../../core/subagent/index.js";
-import { createFastFetchToolDefinition } from "../../core/tools/index.js";
+import { createWebSearchToolDefinition } from "../../core/tools/index.js";
 import { getTextOutput } from "../../core/tools/render-utils.js";
 import { stripFrontmatter } from "../../utils/frontmatter.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
@@ -619,15 +619,15 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		}
 	}
 
-	async function runFastFetch(command: Extract<RpcCommand, { type: "fast_fetch" }>) {
+	async function runWebSearch(command: Extract<RpcCommand, { type: "web_search" }>) {
 		const ui = createExtensionUIContext(activeSessionId ?? undefined);
-		ui.setStatus("fast-fetch", "fetching...");
+		ui.setStatus("web-search", "fetching...");
 		try {
-			const tool = createFastFetchToolDefinition(session.activeCwd, {
-				settings: session.settingsManager.getFastFetchSettings(),
+			const tool = createWebSearchToolDefinition(session.activeCwd, {
+				settings: session.settingsManager.getWebSearchSettings(),
 			});
 			const result = await tool.execute(
-				"rpc-fast-fetch",
+				"rpc-web-search",
 				{
 					query: command.query,
 					mode: command.mode,
@@ -638,10 +638,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				undefined,
 				undefined as never,
 			);
-			ui.setStatus("fast-fetch", `done: ${result.details?.status ?? "ok"}`);
+			ui.setStatus("web-search", `done: ${result.details?.status ?? "ok"}`);
 			return { text: getTextOutput(result, false), details: result.details };
 		} catch (e) {
-			ui.setStatus("fast-fetch", undefined);
+			ui.setStatus("web-search", undefined);
 			throw e;
 		}
 	}
@@ -831,16 +831,16 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				}
 			}
 
-			case "fast_fetch": {
+			case "web_search": {
 				const query = command.query.trim();
 				if (!query) {
-					return error(id, "fast_fetch", "Usage: fast_fetch <query-or-url>");
+					return error(id, "web_search", "Usage: web_search <query-or-url>");
 				}
 				try {
-					const result = await runFastFetch(command);
-					return success(id, "fast_fetch", result);
+					const result = await runWebSearch(command);
+					return success(id, "web_search", result);
 				} catch (e) {
-					return error(id, "fast_fetch", (e as Error).message);
+					return error(id, "web_search", (e as Error).message);
 				}
 			}
 

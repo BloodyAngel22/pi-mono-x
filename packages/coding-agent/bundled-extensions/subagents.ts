@@ -36,11 +36,11 @@ function buildGuidance(agents: SubagentConfig[]): string {
 	let guidance = `
 ## Staged Research Protocol
 
-**Stage 1 — fast_context / fast_fetch (30 seconds max):**
+**Stage 1 — fast_context / web_search (30 seconds max):**
 Use these tools FIRST for any code search or web lookup. They are optimized for speed.
 
 **Stage 2 — Sub-agent delegation (only if Stage 1 failed):**
-Delegate to \`task\` only when fast_context/fast_fetch did not yield enough information.
+Delegate to \`task\` only when fast_context/web_search did not yield enough information.
 
 **Stage 3 — Direct file reading (only when absolutely necessary):**
 Only read files directly if you know the exact path and the content is critical.
@@ -74,7 +74,7 @@ Only the final result is returned to your context, saving significant tokens.
 - NEVER read a whole codebase directly -- delegate via \`task\`
 - NEVER narrate your process to the user ("I will now use a sub-agent...", "The sub-agent returned..."). Just present the result as your own answer.
 - After \`task\` returns, answer the user directly and concisely. Do not explain what the sub-agent did.
-- For web research, prefer fast_fetch before delegating to sub-agent — fast_fetch is faster and cheaper.
+- For web research, prefer web_search before delegating to sub-agent — web_search is faster and cheaper.
 - For independent sub-tasks, call multiple \`task\` tools -- they run in parallel.`.trim();
 
 	if (agents.length > 0) {

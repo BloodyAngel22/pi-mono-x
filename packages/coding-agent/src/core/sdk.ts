@@ -20,7 +20,6 @@ import {
 	createBashTool,
 	createCodingTools,
 	createEditTool,
-	createFastFetchTool,
 	createFindTool,
 	createGrepTool,
 	createLsTool,
@@ -28,6 +27,7 @@ import {
 	createReadTool,
 	createVirtualInteractTool,
 	createVirtualScreenshotTool,
+	createWebSearchTool,
 	createWriteTool,
 	type ToolName,
 	withFileMutationQueue,
@@ -124,7 +124,7 @@ export {
 	createGrepTool,
 	createFindTool,
 	createLsTool,
-	createFastFetchTool,
+	createWebSearchTool,
 };
 
 // Helper Functions
@@ -282,7 +282,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		"edit",
 		"write",
 		"fast_context",
-		"fast_fetch",
+		"web_search",
 		"virtual_screenshot",
 		"virtual_interact",
 	];

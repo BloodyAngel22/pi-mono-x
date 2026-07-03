@@ -235,10 +235,10 @@ export class SubagentManager {
 		systemPrompt +=
 			"\n\nCodebase search policy: if you need to locate relevant code and the exact file is not already known, call fast_context first. " +
 			"Use the returned files/ranges to choose targeted read calls. Avoid long broad exploration with ls/find/grep/read before fast_context." +
-			"\nWeb fetch policy: use fast_fetch for quick web lookups or URL reads when MCP web tools are unavailable, slow, or unnecessary.";
+			"\nWeb fetch policy: use web_search for quick web lookups or URL reads when MCP web tools are unavailable, slow, or unnecessary.";
 
 		const toolNames = options.tools ??
-			options.agent?.tools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "fast_context", "fast_fetch"];
+			options.agent?.tools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "fast_context", "web_search"];
 
 		// Filter MCP tools by agent glob patterns
 		const customTools: ToolDefinition[] = [];

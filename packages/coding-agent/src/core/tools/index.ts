@@ -23,13 +23,6 @@ export {
 	type FastContextToolDetails,
 	type FastContextToolInput,
 } from "./fast-context.js";
-export {
-	createFastFetchTool,
-	createFastFetchToolDefinition,
-	type FastFetchToolDetails,
-	type FastFetchToolInput,
-	type FastFetchToolOptions,
-} from "./fast-fetch.js";
 export { withFileMutationQueue } from "./file-mutation-queue.js";
 export {
 	createFindTool,
@@ -88,6 +81,13 @@ export {
 	type VirtualScreenshotToolOptions,
 } from "./virtual-screenshot.js";
 export {
+	createWebSearchTool,
+	createWebSearchToolDefinition,
+	type WebSearchToolDetails,
+	type WebSearchToolInput,
+	type WebSearchToolOptions,
+} from "./web-search.js";
+export {
 	createWriteTool,
 	createWriteToolDefinition,
 	type WriteOperations,
@@ -100,7 +100,6 @@ import type { ToolDefinition } from "../extensions/types.js";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.js";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.js";
 import { createFastContextTool, createFastContextToolDefinition } from "./fast-context.js";
-import { createFastFetchTool, createFastFetchToolDefinition, type FastFetchToolOptions } from "./fast-fetch.js";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.js";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.js";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.js";
@@ -115,6 +114,7 @@ import {
 	createVirtualScreenshotToolDefinition,
 	type VirtualScreenshotToolOptions,
 } from "./virtual-screenshot.js";
+import { createWebSearchTool, createWebSearchToolDefinition, type WebSearchToolOptions } from "./web-search.js";
 import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } from "./write.js";
 
 export type Tool = AgentTool<any>;
@@ -128,7 +128,7 @@ export type ToolName =
 	| "find"
 	| "ls"
 	| "fast_context"
-	| "fast_fetch"
+	| "web_search"
 	| "virtual_screenshot"
 	| "virtual_interact";
 export const allToolNames: Set<ToolName> = new Set([
@@ -140,7 +140,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"find",
 	"ls",
 	"fast_context",
-	"fast_fetch",
+	"web_search",
 	"virtual_screenshot",
 	"virtual_interact",
 ]);
@@ -153,7 +153,7 @@ export interface ToolsOptions {
 	grep?: GrepToolOptions;
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
-	fastFetch?: FastFetchToolOptions;
+	webSearch?: WebSearchToolOptions;
 	virtualScreenshot?: VirtualScreenshotToolOptions;
 	virtualInteract?: VirtualInteractToolOptions;
 }
@@ -176,8 +176,8 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createLsToolDefinition(cwd, options?.ls);
 		case "fast_context":
 			return createFastContextToolDefinition(cwd);
-		case "fast_fetch":
-			return createFastFetchToolDefinition(cwd, options?.fastFetch);
+		case "web_search":
+			return createWebSearchToolDefinition(cwd, options?.webSearch);
 		case "virtual_screenshot":
 			return createVirtualScreenshotToolDefinition(cwd, options?.virtualScreenshot);
 		case "virtual_interact":
@@ -205,8 +205,8 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createLsTool(cwd, options?.ls);
 		case "fast_context":
 			return createFastContextTool(cwd);
-		case "fast_fetch":
-			return createFastFetchTool(cwd, options?.fastFetch);
+		case "web_search":
+			return createWebSearchTool(cwd, options?.webSearch);
 		case "virtual_screenshot":
 			return createVirtualScreenshotTool(cwd, options?.virtualScreenshot);
 		case "virtual_interact":
@@ -234,7 +234,7 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 		createFindToolDefinition(cwd, options?.find),
 		createLsToolDefinition(cwd, options?.ls),
 		createFastContextToolDefinition(cwd),
-		createFastFetchToolDefinition(cwd, options?.fastFetch),
+		createWebSearchToolDefinition(cwd, options?.webSearch),
 	];
 }
 
@@ -248,7 +248,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		find: createFindToolDefinition(cwd, options?.find),
 		ls: createLsToolDefinition(cwd, options?.ls),
 		fast_context: createFastContextToolDefinition(cwd),
-		fast_fetch: createFastFetchToolDefinition(cwd, options?.fastFetch),
+		web_search: createWebSearchToolDefinition(cwd, options?.webSearch),
 		virtual_screenshot: createVirtualScreenshotToolDefinition(cwd, options?.virtualScreenshot),
 		virtual_interact: createVirtualInteractToolDefinition(cwd, options?.virtualInteract),
 	};
@@ -272,7 +272,7 @@ export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[]
 		createFindTool(cwd, options?.find),
 		createLsTool(cwd, options?.ls),
 		createFastContextTool(cwd),
-		createFastFetchTool(cwd, options?.fastFetch),
+		createWebSearchTool(cwd, options?.webSearch),
 	];
 }
 
@@ -286,7 +286,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		find: createFindTool(cwd, options?.find),
 		ls: createLsTool(cwd, options?.ls),
 		fast_context: createFastContextTool(cwd),
-		fast_fetch: createFastFetchTool(cwd, options?.fastFetch),
+		web_search: createWebSearchTool(cwd, options?.webSearch),
 		virtual_screenshot: createVirtualScreenshotTool(cwd, options?.virtualScreenshot),
 		virtual_interact: createVirtualInteractTool(cwd, options?.virtualInteract),
 	};

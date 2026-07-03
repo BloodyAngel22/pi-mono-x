@@ -14,7 +14,7 @@ import type { FastContextResult } from "../../core/context-search.js";
 import type { SessionTreeNode } from "../../core/session-manager.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import type { SubagentTask } from "../../core/subagent/types.js";
-import type { FastFetchToolDetails } from "../../core/tools/index.js";
+import type { WebSearchToolDetails } from "../../core/tools/index.js";
 
 // ============================================================================
 // RPC Commands (stdin)
@@ -36,7 +36,7 @@ export type RpcCommand =
 		| { id?: string; type: "fast_context"; query: string; path?: string }
 		| {
 				id?: string;
-				type: "fast_fetch";
+				type: "web_search";
 				query: string;
 				mode?: "search" | "url";
 				maxResults?: number;
@@ -189,9 +189,9 @@ export type RpcResponse =
 	| {
 			id?: string;
 			type: "response";
-			command: "fast_fetch";
+			command: "web_search";
 			success: true;
-			data: { text: string; details: FastFetchToolDetails | undefined };
+			data: { text: string; details: WebSearchToolDetails | undefined };
 	  }
 	| { id?: string; type: "response"; command: "abort"; success: true }
 	| { id?: string; type: "response"; command: "new_session"; success: true; data: { cancelled: boolean } }

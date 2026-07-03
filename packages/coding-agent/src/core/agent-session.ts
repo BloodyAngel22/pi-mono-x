@@ -2873,7 +2873,7 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
-		const fastFetchSettings = this.settingsManager.getFastFetchSettings();
+		const webSearchSettings = this.settingsManager.getWebSearchSettings();
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
@@ -2891,7 +2891,7 @@ export class AgentSession {
 							return { ...ctx, cwd: this._activeCwd };
 						},
 					},
-					fastFetch: { settings: fastFetchSettings },
+					webSearch: { settings: webSearchSettings },
 				});
 
 		this._baseToolDefinitions = new Map(
@@ -2920,7 +2920,7 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "bash", "edit", "write", "fast_context", "fast_fetch", "virtual_screenshot", "virtual_interact"];
+			: ["read", "bash", "edit", "write", "fast_context", "web_search", "virtual_screenshot", "virtual_interact"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,

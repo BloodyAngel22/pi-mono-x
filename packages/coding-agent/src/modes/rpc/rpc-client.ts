@@ -12,7 +12,7 @@ import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import type { FastContextResult } from "../../core/context-search.js";
 import type { SubagentTask } from "../../core/subagent/types.js";
-import type { FastFetchToolDetails } from "../../core/tools/index.js";
+import type { WebSearchToolDetails } from "../../core/tools/index.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
 import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.js";
 
@@ -328,13 +328,13 @@ export class RpcClient {
 	}
 
 	/**
-	 * Fast web search or direct URL fetch without MCP.
+	 * Web search or direct URL fetch without MCP.
 	 */
-	async fastFetch(
+	async webSearch(
 		query: string,
 		options?: { mode?: "search" | "url"; maxResults?: number; timeoutMs?: number },
-	): Promise<{ text: string; details: FastFetchToolDetails | undefined }> {
-		const response = await this.send({ type: "fast_fetch", query, ...options });
+	): Promise<{ text: string; details: WebSearchToolDetails | undefined }> {
+		const response = await this.send({ type: "web_search", query, ...options });
 		return this.getData(response);
 	}
 

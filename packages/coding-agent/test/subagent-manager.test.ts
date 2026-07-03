@@ -38,7 +38,7 @@ function createToolResultOnAbortFactory(): { factory: SubagentSessionFactory; ab
 	const partialMessages = [
 		{
 			role: "toolResult",
-			toolName: "fast_fetch",
+			toolName: "web_search",
 			content: [
 				{
 					type: "text",
@@ -121,7 +121,7 @@ describe("SubagentManager", () => {
 		});
 
 		expect(result.text).toContain("Partial findings before timeout");
-		expect(result.text).toContain("fast_fetch");
+		expect(result.text).toContain("web_search");
 		expect(result.text).toContain("content-visibility");
 		expect(result.text).toContain("useChunkedRender.ts");
 		expect(result.timedOut).toBe(true);

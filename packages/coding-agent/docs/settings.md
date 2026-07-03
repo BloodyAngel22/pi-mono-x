@@ -139,24 +139,27 @@ When a provider requests a retry delay longer than `retry.provider.maxRetryDelay
 | `images.autoResize` | boolean | `true` | Resize images to 2000x2000 max |
 | `images.blockImages` | boolean | `false` | Block all images from being sent to LLM |
 
-### Fast Fetch
+### Web Search
 
-`fast_fetch` is a built-in web search/fetch tool that works without MCP servers. It uses a configurable HTTP search endpoint and can also fetch direct URLs.
+`web_search` is a built-in web search/fetch tool that works without MCP servers. It uses a configurable HTTP search endpoint and can also fetch direct URLs. It sends browser-like default headers, retries transient failures with backoff, and detects common bot-protection challenges (Cloudflare, Akamai, PerimeterX, DataDome, generic captchas) instead of returning raw challenge HTML.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `fastFetch.searchUrl` | string | `https://html.duckduckgo.com/html/` | Search endpoint URL |
-| `fastFetch.queryParam` | string | `q` | Query parameter name appended to `searchUrl` |
-| `fastFetch.headers` | object | - | Headers sent with requests |
-| `fastFetch.timeoutMs` | number | `20000` | Request timeout in milliseconds |
-| `fastFetch.maxBytes` | number | `65536` | Maximum response bytes returned to the model |
-| `fastFetch.maxResults` | number | `5` | Default number of search results/snippets to keep |
+| `webSearch.searchUrl` | string | `https://html.duckduckgo.com/html/` | Search endpoint URL |
+| `webSearch.queryParam` | string | `q` | Query parameter name appended to `searchUrl` |
+| `webSearch.headers` | object | - | Extra headers sent with requests (merged on top of the built-in browser-like defaults; these values win on conflicts) |
+| `webSearch.timeoutMs` | number | `20000` | Per-attempt request timeout in milliseconds |
+| `webSearch.maxBytes` | number | `65536` | Maximum response bytes returned to the model |
+| `webSearch.maxResults` | number | `5` | Default number of search results/snippets to keep |
+| `webSearch.maxRetries` | number | `2` | Retries for transient failures (network errors, 429/500/502/503/504) before giving up |
+| `webSearch.headlessFallback` | boolean | `false` | When a bot-protection challenge is detected, retry the page with a headless browser instead of just reporting the block |
+| `webSearch.headlessTimeoutMs` | number | `30000` | Timeout for the headless-browser fallback navigation |
 
 Example with a SearXNG instance:
 
 ```json
 {
-  "fastFetch": {
+  "webSearch": {
     "searchUrl": "https://searx.example.com/search",
     "queryParam": "q",
     "headers": {
@@ -169,7 +172,15 @@ Example with a SearXNG instance:
 }
 ```
 
-> **Note:** For web search, prefer using MCP tools (e.g., `searxng_web_search`, `searxng_web_url_read`) over `fast_fetch`. MCP tools are generally more reliable and provide more accurate results. Use `fast_fetch` as a fallback when MCP is unavailable or slow.
+**Headless fallback:** `webSearch.headlessFallback` uses [Playwright](https://playwright.dev/) to render the page in a real browser when a bot-protection challenge is detected. Playwright is **not** installed by default (it would add a large Chromium download to every install) — to use this feature, install it manually inside `packages/coding-agent`:
+
+```bash
+npm install playwright && npx playwright install chromium
+```
+
+Without this manual install, `web_search` still detects and reports bot-protection blocks clearly, it just can't bypass them.
+
+> **Note:** For web search, MCP tools (e.g., `searxng_web_search`, `searxng_web_url_read`) can still provide more accurate, structured results than `web_search`'s crude text extraction. Use `web_search` for quick lookups when MCP is unavailable or slow, and MCP tools when you need more precise results.
 
 ### Shell
 

@@ -17,7 +17,7 @@ Use the `deep_research` tool when the task requires more than a quick answer and
 ## When not to use
 
 - The answer is already available in the local codebase context.
-- A single targeted `fast_fetch` lookup is enough.
+- A single targeted `web_search` lookup is enough.
 - The user explicitly asks not to use internet/web research.
 - The task is a simple edit or mechanical refactor.
 
