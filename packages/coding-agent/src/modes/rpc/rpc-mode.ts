@@ -43,10 +43,47 @@ import type {
 	RpcCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
+	RpcMcpServerStatus,
+	RpcMcpStatusResult,
 	RpcResponse,
 	RpcSessionState,
 	RpcSlashCommand,
 } from "./rpc-types.js";
+
+// Mirrors bundled-extensions/mcp/index.ts's globalThis registries. Duplicated
+// (not imported) because bundled extensions are loaded dynamically per
+// session (see core/extensions/loader.ts) and must not be a static import
+// dependency of core RPC code. Keep both files in sync manually.
+const MCP_SHARED_CLIENTS_KEY = Symbol.for("pi-mono-x.mcp.sharedClients.v1");
+const MCP_SESSION_SERVERS_KEY = Symbol.for("pi-mono-x.mcp.sessionServers.v1");
+
+interface McpSharedEntryStatus {
+	status: "connected" | "error" | "connecting" | "retrying";
+	error?: string;
+	attempt?: number;
+	nextRetryAt?: number;
+}
+
+interface McpSharedEntry {
+	tools: { name: string; description?: string }[] | null;
+	status: McpSharedEntryStatus;
+}
+
+interface McpSessionServerInfo {
+	name: string;
+	disabled: boolean;
+	key: string;
+}
+
+function getMcpSharedClientsRegistry(): Map<string, McpSharedEntry> {
+	const g = globalThis as unknown as Record<symbol, Map<string, McpSharedEntry> | undefined>;
+	return (g[MCP_SHARED_CLIENTS_KEY] as Map<string, McpSharedEntry> | undefined) ?? new Map();
+}
+
+function getMcpSessionServersRegistry(): Map<string, McpSessionServerInfo[]> {
+	const g = globalThis as unknown as Record<symbol, Map<string, McpSessionServerInfo[]> | undefined>;
+	return (g[MCP_SESSION_SERVERS_KEY] as Map<string, McpSessionServerInfo[]> | undefined) ?? new Map();
+}
 
 // Re-export types for consumers
 export type {
@@ -867,6 +904,25 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 			case "get_state": {
 				return success(id, "get_state", makeRpcSessionState(targetSessionId, targetSession));
+			}
+
+			case "get_mcp_status": {
+				const sharedClients = getMcpSharedClientsRegistry();
+				const sessionServers = getMcpSessionServersRegistry().get(targetSession.sessionId) ?? [];
+				const servers: RpcMcpServerStatus[] = sessionServers.map(({ name, disabled, key }) => {
+					if (disabled) return { name, status: "disabled", tools: [] };
+					const entry = sharedClients.get(key);
+					return {
+						name,
+						status: entry?.status.status ?? "connecting",
+						error: entry?.status.error,
+						attempt: entry?.status.attempt,
+						nextRetryAt: entry?.status.nextRetryAt,
+						tools: (entry?.tools ?? []).map((t) => ({ name: t.name, description: t.description })),
+					};
+				});
+				const result: RpcMcpStatusResult = { servers };
+				return success(id, "get_mcp_status", result);
 			}
 
 			case "pwd": {

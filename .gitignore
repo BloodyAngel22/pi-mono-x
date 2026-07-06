@@ -43,3 +43,7 @@ collect.sh
 
 graphify-out/
 graphify-out/**
+
+# Generated model files
+packages/ai/src/models.generated.ts
+packages/ai/src/image-models.generated.ts

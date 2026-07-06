@@ -50,6 +50,7 @@ export type RpcCommand =
 		| { id?: string; type: "cd"; path: string }
 		| { id?: string; type: "pwd" }
 		| { id?: string; type: "ls"; path?: string }
+		| { id?: string; type: "get_mcp_status" }
 
 		// Model
 		| { id?: string; type: "set_model"; provider: string; modelId: string }
@@ -172,6 +173,28 @@ export interface RpcSessionState {
 	messageCount: number;
 	pendingMessageCount: number;
 	cwd?: string;
+}
+
+// ============================================================================
+// RPC MCP Status
+// ============================================================================
+
+export interface RpcMcpToolInfo {
+	name: string;
+	description?: string;
+}
+
+export interface RpcMcpServerStatus {
+	name: string;
+	status: "connected" | "connecting" | "retrying" | "error" | "disabled";
+	error?: string;
+	attempt?: number;
+	nextRetryAt?: number;
+	tools: RpcMcpToolInfo[];
+}
+
+export interface RpcMcpStatusResult {
+	servers: RpcMcpServerStatus[];
 }
 
 // ============================================================================

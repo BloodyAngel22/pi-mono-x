@@ -211,6 +211,54 @@ Response:
 
 Messages are `AgentMessage` objects (see [Message Types](#message-types)).
 
+#### get_mcp_status
+
+Get per-server MCP connection status and the live tool list for each configured server (local or remote).
+
+```json
+{"type": "get_mcp_status"}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "get_mcp_status",
+  "success": true,
+  "data": {
+    "servers": [
+      {
+        "name": "everything",
+        "status": "connected",
+        "tools": [
+          {"name": "echo", "description": "Echoes back the input"}
+        ]
+      },
+      {
+        "name": "flaky-server",
+        "status": "retrying",
+        "error": "connect ECONNREFUSED",
+        "attempt": 3,
+        "nextRetryAt": 1735689600000,
+        "tools": []
+      },
+      {
+        "name": "disabled-server",
+        "status": "disabled",
+        "tools": []
+      }
+    ]
+  }
+}
+```
+
+`status` is one of:
+- `connected` — the server is live; `tools` is populated.
+- `connecting` — first connection attempt in progress.
+- `retrying` — a previous attempt failed and a retry is scheduled; `error`, `attempt`, and `nextRetryAt` (epoch ms) are set.
+- `error` — connection failed (rare as a terminal state, since the extension auto-retries with backoff; mostly observed transiently alongside `retrying`).
+- `disabled` — configured in `mcp-config.json` with `"disabled": true`; never attempted, distinct from `error`.
+
 ### Model
 
 #### set_model

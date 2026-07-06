@@ -58,6 +58,10 @@ function configHash(cfg: McpServerConfig): string {
 // it survives re-execution of this module), refcounted per server so a
 // server process is only spawned once per distinct config and only closed
 // once the last tab using it goes away.
+//
+// Also read directly by core's `rpc-mode.ts` (get_mcp_status) to expose
+// per-server status/tools over RPC — that file duplicates (does not import)
+// the `Symbol.for` keys and shapes below, so keep both files in sync.
 // ---------------------------------------------------------------------------
 
 interface SharedMcpEntry {
@@ -78,6 +82,26 @@ function getRegistry(): Map<string, SharedMcpEntry> {
   const g = globalThis as unknown as Record<symbol, Map<string, SharedMcpEntry> | undefined>;
   if (!g[REGISTRY_KEY]) g[REGISTRY_KEY] = new Map();
   return g[REGISTRY_KEY] as Map<string, SharedMcpEntry>;
+}
+
+// Configured-server list per session (including disabled servers, which never
+// get a SharedMcpEntry at all). Keyed by the session's real SessionManager id
+// (ctx.sessionManager.getSessionId()) so core RPC code (rpc-mode.ts) can read
+// it directly via `targetSession.sessionId` — NOT the RPC-mode-local synthetic
+// session id used elsewhere in the protocol. Read by rpc-mode.ts's
+// `get_mcp_status` handler; keep both in sync if this shape changes.
+interface SessionServerInfo {
+  name: string;
+  disabled: boolean;
+  key: string;
+}
+
+const SESSION_SERVERS_KEY = Symbol.for("pi-mono-x.mcp.sessionServers.v1");
+
+function getSessionServersRegistry(): Map<string, SessionServerInfo[]> {
+  const g = globalThis as unknown as Record<symbol, Map<string, SessionServerInfo[]> | undefined>;
+  if (!g[SESSION_SERVERS_KEY]) g[SESSION_SERVERS_KEY] = new Map();
+  return g[SESSION_SERVERS_KEY] as Map<string, SessionServerInfo[]>;
 }
 
 function notifyStatus(entry: SharedMcpEntry): void {
@@ -313,11 +337,25 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     // — release whatever we held before re-acquiring.
     releaseAll();
 
-    const serverEntries = Object.entries(config.mcpServers).filter(([, cfg]) => !cfg.disabled);
+    const sessionId = ctx.sessionManager.getSessionId();
+    const allEntries = Object.entries(config.mcpServers);
+    const serverEntries = allEntries.filter(([, cfg]) => !cfg.disabled);
     const total = serverEntries.length;
+
+    const publishSessionServers = () => {
+      getSessionServersRegistry().set(
+        sessionId,
+        allEntries.map(([name, cfg]) => ({
+          name,
+          disabled: Boolean(cfg.disabled),
+          key: acquiredKeys.get(name) ?? name,
+        })),
+      );
+    };
 
     if (total === 0) {
       if (ctx.hasUI) ctx.ui.setStatus("mcp", "");
+      publishSessionServers();
       return;
     }
 
@@ -375,6 +413,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
         const key = acquireSharedServer(name, serverConfig, log, onStatusChangeRef);
         acquiredKeys.set(name, key);
       }
+      publishSessionServers();
       // Servers already running for another tab are ready immediately.
       for (const [name, key] of acquiredKeys) registerToolsFor(name, key);
       updateStatus(ctx, total);
@@ -565,8 +604,9 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     }
   });
 
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, ctx) => {
     log("Session shutdown: releasing shared MCP servers");
     releaseAll();
+    getSessionServersRegistry().delete(ctx.sessionManager.getSessionId());
   });
 }

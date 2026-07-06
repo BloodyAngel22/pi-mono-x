@@ -14,7 +14,7 @@ import type { FastContextResult } from "../../core/context-search.js";
 import type { SubagentTask } from "../../core/subagent/types.js";
 import type { WebSearchToolDetails } from "../../core/tools/index.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
-import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.js";
+import type { RpcCommand, RpcMcpStatusResult, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.js";
 
 // ============================================================================
 // Types
@@ -207,6 +207,14 @@ export class RpcClient {
 	 */
 	async getState(): Promise<RpcSessionState> {
 		const response = await this.send({ type: "get_state" });
+		return this.getData(response);
+	}
+
+	/**
+	 * Get per-server MCP connection status and tool lists.
+	 */
+	async getMcpStatus(): Promise<RpcMcpStatusResult> {
+		const response = await this.send({ type: "get_mcp_status" });
 		return this.getData(response);
 	}
 
