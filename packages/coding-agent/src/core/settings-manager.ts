@@ -11,6 +11,10 @@ export interface CompactionSettings {
 	keepRecentTokens?: number; // default: 20000
 }
 
+export interface ContextPruningSettings {
+	enabled?: boolean; // default: true
+}
+
 export interface BranchSummarySettings {
 	reserveTokens?: number; // default: 16384 (tokens reserved for prompt + LLM response)
 	skipPrompt?: boolean; // default: false - when true, skips "Summarize branch?" prompt and defaults to no summary
@@ -110,6 +114,7 @@ export interface Settings {
 	followUpMode?: "all" | "one-at-a-time";
 	theme?: string;
 	compaction?: CompactionSettings;
+	contextPruning?: ContextPruningSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
 	hideThinkingBlock?: boolean;
@@ -722,6 +727,19 @@ export class SettingsManager {
 			reserveTokens: this.getCompactionReserveTokens(),
 			keepRecentTokens: this.getCompactionKeepRecentTokens(),
 		};
+	}
+
+	getContextPruningEnabled(): boolean {
+		return this.settings.contextPruning?.enabled ?? true;
+	}
+
+	setContextPruningEnabled(enabled: boolean): void {
+		if (!this.globalSettings.contextPruning) {
+			this.globalSettings.contextPruning = {};
+		}
+		this.globalSettings.contextPruning.enabled = enabled;
+		this.markModified("contextPruning", "enabled");
+		this.save();
 	}
 
 	getBranchSummarySettings(): { reserveTokens: number; skipPrompt: boolean } {

@@ -183,6 +183,7 @@ Response:
     "sessionId": "abc123",
     "sessionName": "my-feature-work",
     "autoCompactionEnabled": true,
+    "contextPruningEnabled": true,
     "messageCount": 5,
     "pendingMessageCount": 0
   }
@@ -437,6 +438,24 @@ Enable or disable automatic compaction when context is nearly full.
 Response:
 ```json
 {"type": "response", "command": "set_auto_compaction", "success": true}
+```
+
+#### set_context_pruning
+
+Enable or disable cheap, non-LLM context pruning. Unlike `set_auto_compaction` (a full
+LLM-driven summarization that only runs at turn boundaries once context is nearly full),
+context pruning runs before every LLM call and replaces stale/superseded `read` tool results
+(a file read again, or read then later written/edited) with a short placeholder in that
+call's context — reducing how often and how large full compaction needs to be. It never
+calls an LLM and never modifies the persisted session log. Enabled by default.
+
+```json
+{"type": "set_context_pruning", "enabled": true}
+```
+
+Response:
+```json
+{"type": "response", "command": "set_context_pruning", "success": true}
 ```
 
 ### Retry
@@ -1022,6 +1041,17 @@ If `reason` was `"overflow"` and compaction succeeds, `willRetry` is `true` and 
 If compaction was aborted, `result` is `null` and `aborted` is `true`.
 
 If compaction failed (e.g., API quota exceeded), `result` is `null`, `aborted` is `false`, and `errorMessage` contains the error description.
+
+### context_pruned
+
+Emitted whenever the built-in context-pruning pass (see `set_context_pruning`) replaces one
+or more stale tool results with a short placeholder before the next LLM call. Purely
+informational — does not modify the persisted session log, so `/compact`, session history,
+and export still see the original content. No client action is required.
+
+```json
+{"type": "context_pruned", "prunedCount": 2, "tokensFreed": 1830, "paths": ["src/foo.ts"]}
+```
 
 ### auto_retry_start / auto_retry_end
 

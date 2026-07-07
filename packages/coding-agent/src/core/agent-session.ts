@@ -157,7 +157,8 @@ export type AgentSessionEvent =
 			errorMessage?: string;
 	  }
 	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
-	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string };
+	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
+	| { type: "context_pruned"; prunedCount: number; tokensFreed: number; paths: string[] };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -2558,6 +2559,24 @@ export class AgentSession {
 	/** Whether auto-compaction is enabled */
 	get autoCompactionEnabled(): boolean {
 		return this.settingsManager.getCompactionEnabled();
+	}
+
+	/**
+	 * Toggle cheap, non-LLM stale-tool-result pruning (runs on every LLM call via
+	 * transformContext, independent of full auto-compaction).
+	 */
+	setContextPruningEnabled(enabled: boolean): void {
+		this.settingsManager.setContextPruningEnabled(enabled);
+	}
+
+	/** Whether context pruning is enabled */
+	get contextPruningEnabled(): boolean {
+		return this.settingsManager.getContextPruningEnabled();
+	}
+
+	/** Notify listeners that stale tool results were pruned from the transient LLM context. */
+	notifyContextPruned(info: { prunedCount: number; tokensFreed: number; paths: string[] }): void {
+		this._emit({ type: "context_pruned", ...info });
 	}
 
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {

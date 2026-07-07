@@ -5,6 +5,7 @@ import { getAgentDir } from "../config.js";
 import { AgentSession } from "./agent-session.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
 import { AuthStorage } from "./auth-storage.js";
+import { pruneStaleReadOnlyToolResults, pruneStaleToolResults } from "./compaction/prune.js";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.js";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.js";
 import { convertToLlm } from "./messages.js";
@@ -333,6 +334,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	};
 
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
+	const sessionRef: { current?: AgentSession } = {};
 
 	agent = new Agent({
 		initialState: {
@@ -381,9 +383,30 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
+			let working = messages;
+			if (sessionRef.current?.contextPruningEnabled) {
+				const pruned = pruneStaleToolResults(working);
+				if (pruned.prunedToolCallIds.length > 0) {
+					sessionRef.current.notifyContextPruned({
+						prunedCount: pruned.prunedToolCallIds.length,
+						tokensFreed: pruned.tokensFreed,
+						paths: pruned.paths,
+					});
+					working = pruned.messages;
+				}
+				const prunedReadOnly = pruneStaleReadOnlyToolResults(working);
+				if (prunedReadOnly.prunedToolCallIds.length > 0) {
+					sessionRef.current.notifyContextPruned({
+						prunedCount: prunedReadOnly.prunedToolCallIds.length,
+						tokensFreed: prunedReadOnly.tokensFreed,
+						paths: prunedReadOnly.paths,
+					});
+					working = prunedReadOnly.messages;
+				}
+			}
 			const runner = extensionRunnerRef.current;
-			if (!runner) return messages;
-			return runner.emitContext(messages);
+			if (!runner) return working;
+			return runner.emitContext(working);
 		},
 		steeringMode: settingsManager.getSteeringMode(),
 		followUpMode: settingsManager.getFollowUpMode(),
@@ -421,6 +444,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 	});
+	sessionRef.current = session;
 	const extensionsResult = resourceLoader.getExtensions();
 
 	return {

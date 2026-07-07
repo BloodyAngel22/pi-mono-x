@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import type {
 	AssistantMessage,
@@ -334,6 +334,12 @@ export interface HarnessOptions {
 	baseToolsOverride?: Record<string, AgentTool>;
 	/** Optional resource loader override. */
 	resourceLoader?: ResourceLoader;
+	/**
+	 * Optional AgentMessage[] -> AgentMessage[] transform, applied before every
+	 * LLM call (mirrors the transformContext wiring in core/sdk.ts). Not set by
+	 * default, since most tests don't need it.
+	 */
+	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 	/** Inline extensions to load into the session resource loader. */
 	extensionFactories?: Array<ExtensionFactory | CreateTestExtensionsResultInput>;
 }
@@ -379,6 +385,7 @@ function createHarnessWithResourceLoader(
 			tools: options.tools ?? [],
 		},
 		streamFn,
+		transformContext: options.transformContext,
 	});
 
 	const sessionManager = SessionManager.inMemory();

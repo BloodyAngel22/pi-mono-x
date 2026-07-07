@@ -491,6 +491,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		sessionId,
 		sessionName: target.sessionName,
 		autoCompactionEnabled: target.autoCompactionEnabled,
+		contextPruningEnabled: target.contextPruningEnabled,
 		autoRetryEnabled: target.autoRetryEnabled,
 		isRetrying: target.isRetrying,
 		retryAttempt: target.retryAttempt,
@@ -1051,6 +1052,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "set_auto_compaction": {
 				targetSession.setAutoCompactionEnabled(command.enabled);
 				return success(id, "set_auto_compaction");
+			}
+
+			case "set_context_pruning": {
+				targetSession.setContextPruningEnabled(command.enabled);
+				return success(id, "set_context_pruning");
 			}
 
 			// =================================================================
