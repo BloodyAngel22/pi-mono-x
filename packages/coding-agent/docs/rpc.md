@@ -458,6 +458,25 @@ Response:
 {"type": "response", "command": "set_context_pruning", "success": true}
 ```
 
+#### set_file_manifest
+
+Enable or disable the transient file manifest note. Independent of `set_context_pruning`:
+on every LLM call, a short "files touched this session" note (modified files, files still
+visible from an earlier read, and files whose only read result has since been pruned) is
+recomputed from the current transient context and appended near the end of that call's
+messages — so the model keeps a sense of which files it has read/written even after their
+raw tool results get pruned or compacted away. It never calls an LLM, is never persisted to
+the session log, and is recomputed fresh (not accumulated) on every call. Enabled by default.
+
+```json
+{"type": "set_file_manifest", "enabled": true}
+```
+
+Response:
+```json
+{"type": "response", "command": "set_file_manifest", "success": true}
+```
+
 ### Retry
 
 #### set_auto_retry

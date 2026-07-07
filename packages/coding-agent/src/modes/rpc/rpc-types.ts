@@ -73,6 +73,7 @@ export type RpcCommand =
 		| { id?: string; type: "compact"; customInstructions?: string }
 		| { id?: string; type: "set_auto_compaction"; enabled: boolean }
 		| { id?: string; type: "set_context_pruning"; enabled: boolean }
+		| { id?: string; type: "set_file_manifest"; enabled: boolean }
 
 		// Retry
 		| { id?: string; type: "set_auto_retry"; enabled: boolean }
@@ -305,6 +306,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "compact"; success: true; data: CompactionResult }
 	| { id?: string; type: "response"; command: "set_auto_compaction"; success: true }
 	| { id?: string; type: "response"; command: "set_context_pruning"; success: true }
+	| { id?: string; type: "response"; command: "set_file_manifest"; success: true }
 
 	// Retry
 	| { id?: string; type: "response"; command: "set_auto_retry"; success: true }

@@ -1059,6 +1059,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				return success(id, "set_context_pruning");
 			}
 
+			case "set_file_manifest": {
+				targetSession.setFileManifestEnabled(command.enabled);
+				return success(id, "set_file_manifest");
+			}
+
 			// =================================================================
 			// Retry
 			// =================================================================

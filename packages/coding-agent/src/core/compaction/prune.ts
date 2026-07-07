@@ -21,6 +21,14 @@ export interface PruneResult {
 	paths: string[];
 }
 
+/** Shared prefix for all stale-tool-result placeholder text, used to detect pruned results elsewhere (e.g. manifest.ts). */
+export const STALE_PLACEHOLDER_PREFIX = "[Stale ";
+
+/** True if `text` is a placeholder produced by `replaceWithPlaceholder` / `pruneStaleToolResults`. */
+export function isStalePlaceholderText(text: string): boolean {
+	return text.startsWith(STALE_PLACEHOLDER_PREFIX);
+}
+
 /** Replace a toolResult's content with a short placeholder, tracking tokens freed. */
 function replaceWithPlaceholder(
 	message: ToolResultMessage,
@@ -32,7 +40,7 @@ function replaceWithPlaceholder(
 		content: [
 			{
 				type: "text" as const,
-				text: `[Stale ${message.toolName} result — ${reason}; original content omitted from context to save space. Full content is still in the session log.]`,
+				text: `${STALE_PLACEHOLDER_PREFIX}${message.toolName} result — ${reason}; original content omitted from context to save space. Full content is still in the session log.]`,
 			},
 		],
 	};
@@ -102,7 +110,7 @@ export function pruneStaleToolResults(messages: AgentMessage[]): PruneResult {
 			content: [
 				{
 					type: "text" as const,
-					text: `[Stale ${message.toolName} result for ${path} — superseded by a later read/write/edit of the same file; original content omitted from context to save space. Full content is still in the session log.]`,
+					text: `${STALE_PLACEHOLDER_PREFIX}${message.toolName} result for ${path} — superseded by a later read/write/edit of the same file; original content omitted from context to save space. Full content is still in the session log.]`,
 				},
 			],
 		};

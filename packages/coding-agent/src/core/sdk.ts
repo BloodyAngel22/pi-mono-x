@@ -5,6 +5,7 @@ import { getAgentDir } from "../config.js";
 import { AgentSession } from "./agent-session.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
 import { AuthStorage } from "./auth-storage.js";
+import { buildFileManifestMessage } from "./compaction/manifest.js";
 import { pruneStaleReadOnlyToolResults, pruneStaleToolResults } from "./compaction/prune.js";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.js";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.js";
@@ -402,6 +403,12 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 						paths: prunedReadOnly.paths,
 					});
 					working = prunedReadOnly.messages;
+				}
+			}
+			if (sessionRef.current?.fileManifestEnabled) {
+				const manifestMessage = buildFileManifestMessage(working, new Date().toISOString());
+				if (manifestMessage) {
+					working = [...working, manifestMessage];
 				}
 			}
 			const runner = extensionRunnerRef.current;

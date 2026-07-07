@@ -15,6 +15,10 @@ export interface ContextPruningSettings {
 	enabled?: boolean; // default: true
 }
 
+export interface FileManifestSettings {
+	enabled?: boolean; // default: true
+}
+
 export interface BranchSummarySettings {
 	reserveTokens?: number; // default: 16384 (tokens reserved for prompt + LLM response)
 	skipPrompt?: boolean; // default: false - when true, skips "Summarize branch?" prompt and defaults to no summary
@@ -115,6 +119,7 @@ export interface Settings {
 	theme?: string;
 	compaction?: CompactionSettings;
 	contextPruning?: ContextPruningSettings;
+	fileManifest?: FileManifestSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
 	hideThinkingBlock?: boolean;
@@ -739,6 +744,19 @@ export class SettingsManager {
 		}
 		this.globalSettings.contextPruning.enabled = enabled;
 		this.markModified("contextPruning", "enabled");
+		this.save();
+	}
+
+	getFileManifestEnabled(): boolean {
+		return this.settings.fileManifest?.enabled ?? true;
+	}
+
+	setFileManifestEnabled(enabled: boolean): void {
+		if (!this.globalSettings.fileManifest) {
+			this.globalSettings.fileManifest = {};
+		}
+		this.globalSettings.fileManifest.enabled = enabled;
+		this.markModified("fileManifest", "enabled");
 		this.save();
 	}
 

@@ -2579,6 +2579,19 @@ export class AgentSession {
 		this._emit({ type: "context_pruned", ...info });
 	}
 
+	/**
+	 * Toggle the transient file manifest note (recomputed and re-injected on every
+	 * LLM call via transformContext, independent of context pruning).
+	 */
+	setFileManifestEnabled(enabled: boolean): void {
+		this.settingsManager.setFileManifestEnabled(enabled);
+	}
+
+	/** Whether the file manifest note is enabled */
+	get fileManifestEnabled(): boolean {
+		return this.settingsManager.getFileManifestEnabled();
+	}
+
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {
 		if (bindings.uiContext !== undefined) {
 			this._extensionUIContext = bindings.uiContext;

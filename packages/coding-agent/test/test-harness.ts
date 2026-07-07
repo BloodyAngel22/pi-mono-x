@@ -28,6 +28,7 @@ import type {
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
+import { convertToLlm } from "../src/core/messages.js";
 import { ModelRegistry } from "../src/core/model-registry.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import type { Settings } from "../src/core/settings-manager.js";
@@ -386,6 +387,10 @@ function createHarnessWithResourceLoader(
 		},
 		streamFn,
 		transformContext: options.transformContext,
+		// Mirrors sdk.ts's real wiring: without this, custom/branchSummary/compactionSummary/
+		// bashExecution messages would be silently dropped by the agent-core default converter,
+		// which only keeps user/assistant/toolResult.
+		convertToLlm,
 	});
 
 	const sessionManager = SessionManager.inMemory();
