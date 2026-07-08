@@ -318,6 +318,11 @@ export class AgentSession {
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
 	private _overflowRecoveryAttempted = false;
+	/** Set by compact() when it replaces agent.state.messages while a tool call is still in
+	 *  flight (mid-run). Consumed once by sdk.ts's `prepareNextTurn` to splice the compacted
+	 *  messages into the active run's own context — see compact()'s comment for why this is
+	 *  needed. */
+	private _pendingMidRunContextReload = false;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -2112,12 +2117,20 @@ export class AgentSession {
 
 	/**
 	 * Manually compact the session context.
-	 * Aborts current agent operation first.
+	 * Aborts current agent operation first — unless we're being called reentrantly from inside a
+	 * tool's execute() (e.g. the bundled "compress" tool via ctx.compact()). In that case there's no
+	 * in-flight LLM stream to interrupt (the run is paused waiting on this very tool call), and
+	 * abort()'s waitForIdle() would never resolve since it waits on the run that contains this call.
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
 		this._disconnectFromAgent();
-		await this.abort();
+		const isMidRun = this.agent.state.pendingToolCalls.size > 0;
+		if (isMidRun) {
+			this.abortRetry();
+		} else {
+			await this.abort();
+		}
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
 
@@ -2205,6 +2218,16 @@ export class AgentSession {
 			this.agent.state.messages = sessionContext.messages;
 			tokensAfter ??= estimateMessageTokens(sessionContext.messages);
 
+			// The active run's own in-flight context (agent-loop.ts's `currentContext`) is a private
+			// snapshot independent of `agent.state.messages` and won't pick up the swap above on its
+			// own — only a future prompt()/continue() call re-reads state.messages. Flag it so
+			// sdk.ts's `prepareNextTurn` can splice the compacted messages into the still-running
+			// loop before its next turn, which is the only way a mid-run compact() (e.g. the
+			// "compress" tool) actually frees up room for the rest of this run.
+			if (isMidRun) {
+				this._pendingMidRunContextReload = true;
+			}
+
 			// Get the saved compaction entry for the extension event
 			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
 				| CompactionEntry
@@ -2260,6 +2283,16 @@ export class AgentSession {
 	abortCompaction(): void {
 		this._compactionAbortController?.abort();
 		this._autoCompactionAbortController?.abort();
+	}
+
+	/**
+	 * Consume the mid-run-context-reload flag set by compact(). Returns true once, then resets to
+	 * false, so sdk.ts's `prepareNextTurn` picks up exactly one context swap per mid-run compaction.
+	 */
+	consumeMidRunContextReload(): boolean {
+		if (!this._pendingMidRunContextReload) return false;
+		this._pendingMidRunContextReload = false;
+		return true;
 	}
 
 	/**

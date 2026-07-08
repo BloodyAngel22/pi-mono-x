@@ -415,6 +415,21 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			if (!runner) return working;
 			return runner.emitContext(working);
 		},
+		// A mid-run compact() call (e.g. the LLM calling the bundled "compress" tool) replaces
+		// agent.state.messages, but the currently-running loop keeps its own private context
+		// snapshot (agent-loop.ts's `currentContext`) that never re-reads state.messages on its
+		// own — so without this, the compaction wouldn't free up any room for the rest of this
+		// run, only for the next one. Splice the compacted messages in for the next turn.
+		prepareNextTurn: async () => {
+			if (!sessionRef.current?.consumeMidRunContextReload()) return undefined;
+			return {
+				context: {
+					systemPrompt: agent.state.systemPrompt,
+					messages: agent.state.messages.slice(),
+					tools: agent.state.tools.slice(),
+				},
+			};
+		},
 		steeringMode: settingsManager.getSteeringMode(),
 		followUpMode: settingsManager.getFollowUpMode(),
 		transport: settingsManager.getTransport(),

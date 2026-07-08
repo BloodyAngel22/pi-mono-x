@@ -889,6 +889,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "abort": {
+				// abortCompaction() cancels an in-progress manual/auto compaction (its own
+				// AbortController); abort() only touches the agent's run and never reaches it.
+				targetSession.abortCompaction();
 				await targetSession.abort();
 				return success(id, "abort");
 			}
