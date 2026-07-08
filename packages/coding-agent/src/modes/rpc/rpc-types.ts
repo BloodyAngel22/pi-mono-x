@@ -170,6 +170,7 @@ export interface RpcSessionState {
 	sessionName?: string;
 	autoCompactionEnabled: boolean;
 	contextPruningEnabled: boolean;
+	fileManifestEnabled: boolean;
 	autoRetryEnabled: boolean;
 	isRetrying: boolean;
 	retryAttempt: number;

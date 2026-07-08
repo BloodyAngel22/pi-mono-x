@@ -492,6 +492,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		sessionName: target.sessionName,
 		autoCompactionEnabled: target.autoCompactionEnabled,
 		contextPruningEnabled: target.contextPruningEnabled,
+		fileManifestEnabled: target.fileManifestEnabled,
 		autoRetryEnabled: target.autoRetryEnabled,
 		isRetrying: target.isRetrying,
 		retryAttempt: target.retryAttempt,
