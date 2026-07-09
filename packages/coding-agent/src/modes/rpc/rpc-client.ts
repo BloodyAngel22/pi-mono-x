@@ -413,6 +413,15 @@ export class RpcClient {
 	}
 
 	/**
+	 * Get the full, uncompacted session history (messages a prior compaction
+	 * excluded from LLM context are included, with inline compaction markers).
+	 */
+	async getFullHistory(): Promise<AgentMessage[]> {
+		const response = await this.send({ type: "get_full_history" });
+		return this.getData<{ messages: AgentMessage[] }>(response).messages;
+	}
+
+	/**
 	 * Get available commands (extension commands, prompt templates, skills).
 	 */
 	async getCommands(): Promise<RpcSlashCommand[]> {

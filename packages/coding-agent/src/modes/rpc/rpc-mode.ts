@@ -1287,6 +1287,21 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				return success(id, "get_messages", { messages: annotated });
 			}
 
+			case "get_full_history": {
+				const rawMessages = targetSession.sessionManager.buildFullHistory().messages;
+				const entries = (targetSession.sessionManager as any).getBranch() as Array<{
+					type: string;
+					message?: unknown;
+					id: string;
+				}>;
+				const messageEntries = entries.filter((e) => e.type === "message");
+				const annotated = rawMessages.map((msg, index) => {
+					const entry = messageEntries.find((e) => e.message === msg) ?? messageEntries[index];
+					return entry ? { ...msg, entryId: entry.id } : msg;
+				});
+				return success(id, "get_full_history", { messages: annotated });
+			}
+
 			// =================================================================
 			// Commands (available for invocation via prompt)
 			// =================================================================

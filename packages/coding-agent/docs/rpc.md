@@ -213,6 +213,36 @@ Response:
 
 Messages are `AgentMessage` objects (see [Message Types](#message-types)).
 
+If the session was compacted, `get_messages` reflects the *LLM-facing* view:
+messages before the compaction's `firstKeptEntryId` are replaced by a single
+`compactionSummary` message. Use `get_full_history` to get the complete,
+uncompacted transcript instead.
+
+#### get_full_history
+
+Get the complete conversation transcript, including messages a prior
+compaction excluded from the LLM context. Unlike `get_messages`, nothing is
+ever dropped — each compaction appears as an inline `compactionSummary`
+marker at the point it occurred, with the original messages before and after
+it left intact. Intended for UI/display purposes, not for feeding back into
+the LLM (tool results are not compressed).
+
+```json
+{"type": "get_full_history"}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "get_full_history",
+  "success": true,
+  "data": {"messages": [...]}
+}
+```
+
+Messages are `AgentMessage` objects (see [Message Types](#message-types)).
+
 #### get_mcp_status
 
 Get per-server MCP connection status and the live tool list for each configured server (local or remote).

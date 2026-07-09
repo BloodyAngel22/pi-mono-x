@@ -455,6 +455,86 @@ export function buildSessionContext(
 }
 
 /**
+ * Build the full, uncompacted session history for display purposes.
+ * Unlike buildSessionContext(), this never drops messages that a compaction
+ * excluded from the LLM context — it replays every entry in chronological
+ * order and inserts a compactionSummary marker inline at each compaction
+ * point instead of using it to truncate. Not suitable for LLM context (no
+ * tool-result compression, and token counts stay unbounded).
+ */
+export function buildFullSessionHistory(
+	entries: SessionEntry[],
+	leafId?: string | null,
+	byId?: Map<string, SessionEntry>,
+): SessionContext {
+	// Build uuid index if not available
+	if (!byId) {
+		byId = new Map<string, SessionEntry>();
+		for (const entry of entries) {
+			byId.set(entry.id, entry);
+		}
+	}
+
+	// Find leaf
+	let leaf: SessionEntry | undefined;
+	if (leafId === null) {
+		// Explicitly null - return no messages (navigated to before first entry)
+		return { messages: [], thinkingLevel: "off", model: null };
+	}
+	if (leafId) {
+		leaf = byId.get(leafId);
+	}
+	if (!leaf) {
+		// Fallback to last entry (when leafId is undefined)
+		leaf = entries[entries.length - 1];
+	}
+
+	if (!leaf) {
+		return { messages: [], thinkingLevel: "off", model: null };
+	}
+
+	// Walk from leaf to root, collecting path
+	const path: SessionEntry[] = [];
+	let current: SessionEntry | undefined = leaf;
+	while (current) {
+		path.unshift(current);
+		current = current.parentId ? byId.get(current.parentId) : undefined;
+	}
+
+	// Extract settings
+	let thinkingLevel = "off";
+	let model: { provider: string; modelId: string } | null = null;
+	for (const entry of path) {
+		if (entry.type === "thinking_level_change") {
+			thinkingLevel = entry.thinkingLevel;
+		} else if (entry.type === "model_change") {
+			model = { provider: entry.provider, modelId: entry.modelId };
+		} else if (entry.type === "message" && entry.message.role === "assistant") {
+			model = { provider: entry.message.provider, modelId: entry.message.model };
+		}
+	}
+
+	// Emit every entry in order. Compactions become inline markers rather than
+	// truncation points — nothing before them is dropped.
+	const messages: AgentMessage[] = [];
+	for (const entry of path) {
+		if (entry.type === "compaction") {
+			messages.push(createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp));
+		} else if (entry.type === "message") {
+			messages.push(entry.message);
+		} else if (entry.type === "custom_message") {
+			messages.push(
+				createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp),
+			);
+		} else if (entry.type === "branch_summary" && entry.summary) {
+			messages.push(createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp));
+		}
+	}
+
+	return { messages, thinkingLevel, model };
+}
+
+/**
  * Compute the default session directory for a cwd.
  * Encodes cwd into a safe directory name under ~/.pi/agent/sessions/.
  */
@@ -1140,6 +1220,14 @@ export class SessionManager {
 	 */
 	buildSessionContext(): SessionContext {
 		return buildSessionContext(this.getEntries(), this.leafId, this.byId);
+	}
+
+	/**
+	 * Build the full, uncompacted session history for display. See
+	 * buildFullSessionHistory() for details.
+	 */
+	buildFullHistory(): SessionContext {
+		return buildFullSessionHistory(this.getEntries(), this.leafId, this.byId);
 	}
 
 	/**

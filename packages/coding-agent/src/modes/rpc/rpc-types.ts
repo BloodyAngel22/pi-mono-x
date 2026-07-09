@@ -114,6 +114,7 @@ export type RpcCommand =
 
 		// Messages
 		| { id?: string; type: "get_messages" }
+		| { id?: string; type: "get_full_history" }
 
 		// Commands and skills (available for invocation via prompt)
 		| { id?: string; type: "get_commands" }
@@ -380,6 +381,13 @@ export type RpcResponse =
 
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_full_history";
+			success: true;
+			data: { messages: AgentMessage[] };
+	  }
 
 	// Commands and skills
 	| {

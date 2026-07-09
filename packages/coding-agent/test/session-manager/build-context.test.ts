@@ -2,6 +2,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
 import {
 	type BranchSummaryEntry,
+	buildFullSessionHistory,
 	buildSessionContext,
 	type CompactionEntry,
 	type ModelChangeEntry,
@@ -420,5 +421,77 @@ describe("buildSessionContext", () => {
 				expect(text?.text).toContain("\n".repeat(100)); // raw content intact
 			}
 		});
+	});
+});
+
+describe("buildFullSessionHistory", () => {
+	it("matches buildSessionContext when there is no compaction", () => {
+		const entries: SessionEntry[] = [
+			msg("1", null, "user", "hello"),
+			msg("2", "1", "assistant", "hi there"),
+			msg("3", "2", "user", "how are you"),
+			msg("4", "3", "assistant", "great"),
+		];
+		const full = buildFullSessionHistory(entries);
+		const trimmed = buildSessionContext(entries);
+		expect(full.messages).toHaveLength(4);
+		expect(full.messages).toEqual(trimmed.messages);
+		expect(full.thinkingLevel).toBe(trimmed.thinkingLevel);
+		expect(full.model).toEqual(trimmed.model);
+	});
+
+	it("keeps messages before firstKeptEntryId that buildSessionContext drops", () => {
+		const entries: SessionEntry[] = [
+			msg("1", null, "user", "first"),
+			msg("2", "1", "assistant", "response1"),
+			msg("3", "2", "user", "second"),
+			msg("4", "3", "assistant", "response2"),
+			compaction("5", "4", "Summary of first two turns", "3"),
+			msg("6", "5", "user", "third"),
+			msg("7", "6", "assistant", "response3"),
+		];
+
+		// buildSessionContext drops entries 1-2 (before firstKeptEntryId "3")
+		const trimmed = buildSessionContext(entries);
+		expect(trimmed.messages).toHaveLength(5);
+
+		// buildFullSessionHistory keeps everything in chronological order:
+		// first, response1, second, response2, marker (compaction happened here), third, response3
+		const full = buildFullSessionHistory(entries);
+		expect(full.messages).toHaveLength(7);
+		expect((full.messages[0] as any).content).toBe("first");
+		expect((full.messages[1] as any).content[0].text).toBe("response1");
+		expect((full.messages[2] as any).content).toBe("second");
+		expect((full.messages[3] as any).content[0].text).toBe("response2");
+		expect((full.messages[4] as any).summary).toContain("Summary of first two turns");
+		expect((full.messages[5] as any).content).toBe("third");
+		expect((full.messages[6] as any).content[0].text).toBe("response3");
+	});
+
+	it("includes an inline marker for every past compaction, not just the latest", () => {
+		const entries: SessionEntry[] = [
+			msg("1", null, "user", "a"),
+			msg("2", "1", "assistant", "b"),
+			compaction("3", "2", "First summary", "1"),
+			msg("4", "3", "user", "c"),
+			msg("5", "4", "assistant", "d"),
+			compaction("6", "5", "Second summary", "4"),
+			msg("7", "6", "user", "e"),
+		];
+
+		// buildSessionContext only honors the latest compaction
+		const trimmed = buildSessionContext(entries);
+		expect(trimmed.messages).toHaveLength(4);
+
+		// buildFullSessionHistory keeps both markers and all 5 real messages = 7
+		const full = buildFullSessionHistory(entries);
+		expect(full.messages).toHaveLength(7);
+		expect((full.messages[0] as any).content).toBe("a");
+		expect((full.messages[1] as any).content[0].text).toBe("b");
+		expect((full.messages[2] as any).summary).toContain("First summary");
+		expect((full.messages[3] as any).content).toBe("c");
+		expect((full.messages[4] as any).content[0].text).toBe("d");
+		expect((full.messages[5] as any).summary).toContain("Second summary");
+		expect((full.messages[6] as any).content).toBe("e");
 	});
 });
