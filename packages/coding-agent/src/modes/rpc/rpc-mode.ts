@@ -499,6 +499,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		messageCount: target.messages.length,
 		pendingMessageCount: target.pendingMessageCount,
 		cwd: target.activeCwd,
+		planMode: target.planMode.state,
 	});
 
 	function subscribeSession(sessionId: string, target: AgentSession): void {
@@ -1066,6 +1067,20 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "set_file_manifest": {
 				targetSession.setFileManifestEnabled(command.enabled);
 				return success(id, "set_file_manifest");
+			}
+
+			// =================================================================
+			// Plan Mode
+			// =================================================================
+
+			case "enter_plan_mode": {
+				const planFilePath = targetSession.enterPlanMode(command.name);
+				return success(id, "enter_plan_mode", { planFilePath });
+			}
+
+			case "exit_plan_mode": {
+				const planFilePath = targetSession.exitPlanMode();
+				return success(id, "exit_plan_mode", { planFilePath });
 			}
 
 			// =================================================================

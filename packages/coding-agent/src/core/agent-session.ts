@@ -92,11 +92,16 @@ import {
 	type PolicyType,
 	type PolicyValue,
 } from "./permissions.js";
-import { PlanMode } from "./plan-mode.js";
+import { PlanMode, type PlanModeState } from "./plan-mode.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
 import type { BranchSummaryEntry, CompactionEntry, SessionManager } from "./session-manager.js";
-import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.js";
+import {
+	CURRENT_SESSION_VERSION,
+	getLatestCompactionEntry,
+	getLatestCustomEntry,
+	type SessionHeader,
+} from "./session-manager.js";
 import type { SettingsManager } from "./settings-manager.js";
 import type { SlashCommandInfo } from "./slash-commands.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
@@ -292,6 +297,9 @@ interface ToolDefinitionEntry {
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 
+/** customType used to persist PlanMode state (see enterPlanMode/exitPlanMode) across session reloads. */
+const PLAN_MODE_CUSTOM_ENTRY_TYPE = "plan_mode";
+
 // ============================================================================
 // AgentSession Class
 // ============================================================================
@@ -397,6 +405,14 @@ export class AgentSession {
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._fileCheckpoint = FileCheckpoint.tryLoadFromDisk(this.sessionId);
+
+		// Restore plan mode (active/planFilePath/planName) from the session log, if any was
+		// persisted — so plan mode survives process restart, switch_session, and fork.
+		const restoredPlanMode = getLatestCustomEntry<PlanModeState>(
+			this.sessionManager.getBranch(),
+			PLAN_MODE_CUSTOM_ENTRY_TYPE,
+		)?.data;
+		this.planMode.restore(restoredPlanMode);
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -3235,6 +3251,27 @@ export class AgentSession {
 	setSessionName(name: string): void {
 		this.sessionManager.appendSessionInfo(name);
 		this._emit({ type: "session_info_changed", name: this.sessionManager.getSessionName() });
+	}
+
+	// =========================================================================
+	// Plan Mode
+	// =========================================================================
+
+	/**
+	 * Enter plan mode and persist the change so it survives process restart /
+	 * switch_session / fork (see restoration in the constructor).
+	 */
+	enterPlanMode(name?: string): string {
+		const planFilePath = this.planMode.enter(name);
+		this.sessionManager.appendCustomEntry(PLAN_MODE_CUSTOM_ENTRY_TYPE, this.planMode.state);
+		return planFilePath;
+	}
+
+	/** Exit plan mode and persist the change. Returns the plan file path (for /execute context). */
+	exitPlanMode(): string | undefined {
+		const planFilePath = this.planMode.exit();
+		this.sessionManager.appendCustomEntry(PLAN_MODE_CUSTOM_ENTRY_TYPE, this.planMode.state);
+		return planFilePath;
 	}
 
 	// =========================================================================

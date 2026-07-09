@@ -66,6 +66,18 @@ export class PlanMode {
 		return path;
 	}
 
+	/**
+	 * Restore previously-persisted state (see `AgentSession.enterPlanMode`/`exitPlanMode`)
+	 * without creating a new plan file — used when a session is reloaded (app restart,
+	 * `switch_session`, fork) so plan mode survives across the AgentSession's lifetime.
+	 */
+	restore(state: PlanModeState | undefined): void {
+		if (!state) return;
+		this._active = state.active;
+		this._planFilePath = state.planFilePath;
+		this._planName = state.planName;
+	}
+
 	/** Toggle between plan and execute modes. */
 	toggle(name?: string): { entered: boolean; planFilePath?: string } {
 		if (this._active) {

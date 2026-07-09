@@ -6027,7 +6027,7 @@ export class InteractiveMode {
 			);
 			return;
 		}
-		const filePath = planMode.enter(name);
+		const filePath = this.session.enterPlanMode(name);
 		this.footerDataProvider.setExtensionStatus("plan-mode", "[PLAN]");
 		this.showStatus(
 			`Plan mode active.\nPlan file: ${filePath}\nThe agent will analyze the codebase and write a plan. Use /execute when ready.`,
@@ -6042,7 +6042,7 @@ export class InteractiveMode {
 			return;
 		}
 		const executeMessage = planMode.buildExecuteMessage();
-		planMode.exit();
+		this.session.exitPlanMode();
 		this.footerDataProvider.setExtensionStatus("plan-mode", undefined);
 		this.activatePlanTodoWidget();
 		this.showStatus("Plan mode ended. Starting execution.");

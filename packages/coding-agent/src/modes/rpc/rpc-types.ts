@@ -11,6 +11,7 @@ import type { AgentPresetConfig, SessionStats } from "../../core/agent-session.j
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import type { FastContextResult } from "../../core/context-search.js";
+import type { PlanModeState } from "../../core/plan-mode.js";
 import type { SessionTreeNode } from "../../core/session-manager.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import type { SubagentTask } from "../../core/subagent/types.js";
@@ -74,6 +75,10 @@ export type RpcCommand =
 		| { id?: string; type: "set_auto_compaction"; enabled: boolean }
 		| { id?: string; type: "set_context_pruning"; enabled: boolean }
 		| { id?: string; type: "set_file_manifest"; enabled: boolean }
+
+		// Plan mode
+		| { id?: string; type: "enter_plan_mode"; name?: string }
+		| { id?: string; type: "exit_plan_mode" }
 
 		// Retry
 		| { id?: string; type: "set_auto_retry"; enabled: boolean }
@@ -177,6 +182,7 @@ export interface RpcSessionState {
 	messageCount: number;
 	pendingMessageCount: number;
 	cwd?: string;
+	planMode: PlanModeState;
 }
 
 // ============================================================================
@@ -308,6 +314,10 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "set_auto_compaction"; success: true }
 	| { id?: string; type: "response"; command: "set_context_pruning"; success: true }
 	| { id?: string; type: "response"; command: "set_file_manifest"; success: true }
+
+	// Plan mode
+	| { id?: string; type: "response"; command: "enter_plan_mode"; success: true; data: { planFilePath: string } }
+	| { id?: string; type: "response"; command: "exit_plan_mode"; success: true; data: { planFilePath?: string } }
 
 	// Retry
 	| { id?: string; type: "response"; command: "set_auto_retry"; success: true }

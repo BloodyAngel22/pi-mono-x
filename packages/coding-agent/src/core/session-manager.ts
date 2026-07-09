@@ -314,6 +314,17 @@ export function getLatestCompactionEntry(entries: SessionEntry[]): CompactionEnt
 	return null;
 }
 
+/** Find the most recent custom entry of a given `customType`, walking the branch backwards. */
+export function getLatestCustomEntry<T = unknown>(entries: SessionEntry[], customType: string): CustomEntry<T> | null {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i];
+		if (entry.type === "custom" && entry.customType === customType) {
+			return entry as CustomEntry<T>;
+		}
+	}
+	return null;
+}
+
 /**
  * Build the session context from entries using tree traversal.
  * If leafId is provided, walks from that entry to root.

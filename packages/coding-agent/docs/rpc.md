@@ -185,12 +185,13 @@ Response:
     "autoCompactionEnabled": true,
     "contextPruningEnabled": true,
     "messageCount": 5,
-    "pendingMessageCount": 0
+    "pendingMessageCount": 0,
+    "planMode": {"active": false}
   }
 }
 ```
 
-The `model` field is a full [Model](#model) object or `null`. The `sessionName` field is the display name set via `set_session_name`, or omitted if not set.
+The `model` field is a full [Model](#model) object or `null`. The `sessionName` field is the display name set via `set_session_name`, or omitted if not set. See [Plan Mode](#plan-mode) for the `planMode` field and the commands that change it.
 
 #### get_messages
 
@@ -476,6 +477,47 @@ Response:
 ```json
 {"type": "response", "command": "set_file_manifest", "success": true}
 ```
+
+### Plan Mode
+
+#### enter_plan_mode
+
+Enter plan mode. Creates a plan file and restricts the agent for the rest of the session
+(until `exit_plan_mode`) to read-only tools plus writing/editing that single plan file:
+the `bash` tool only allows a read-only command whitelist (`ls`, `cat`, `grep`, `find`, `rg`,
+`head`, `tail`, etc.), and `write`/`edit` calls targeting any other path are blocked with a
+`[PLAN MODE]` error. A system prompt appendix instructing the agent to explore the codebase
+and record its plan in the plan file is added automatically while active.
+
+```json
+{"type": "enter_plan_mode", "name": "refactor-auth"}
+```
+
+`name` is optional and only used to build a readable plan file name.
+
+Response:
+```json
+{"type": "response", "command": "enter_plan_mode", "success": true, "data": {"planFilePath": "/home/user/tmp/.pi/plans/2026-07-09T12-00-00-refactor-auth.md"}}
+```
+
+#### exit_plan_mode
+
+Exit plan mode, lifting the tool restrictions described above.
+
+```json
+{"type": "exit_plan_mode"}
+```
+
+Response:
+```json
+{"type": "response", "command": "exit_plan_mode", "success": true, "data": {"planFilePath": "/home/user/tmp/.pi/plans/2026-07-09T12-00-00-refactor-auth.md"}}
+```
+
+Current plan mode state (`active`, `planFilePath`, `planName`) is included in `get_state` under `planMode`.
+
+Plan mode state is persisted to the session log (as a `custom` entry, `plan_mode` type) and
+restored whenever the session is reloaded — process restart, `switch_session`, or resuming a
+session file — so an in-progress plan survives closing and reopening the client.
 
 ### Retry
 
