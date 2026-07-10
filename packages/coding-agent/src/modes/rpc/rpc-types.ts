@@ -119,6 +119,7 @@ export type RpcCommand =
 		// Commands and skills (available for invocation via prompt)
 		| { id?: string; type: "get_commands" }
 		| { id?: string; type: "get_skill_detail"; name: string }
+		| { id?: string; type: "get_command_detail"; name: string }
 		| { id?: string; type: "suggest_skills"; query: string; limit?: number; minScore?: number }
 
 		// Sub-agents
@@ -408,6 +409,18 @@ export type RpcResponse =
 				categories: string[];
 				path: string;
 				baseDir: string;
+				content: string;
+			};
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_command_detail";
+			success: true;
+			data: {
+				name: string;
+				description: string;
+				path: string;
 				content: string;
 			};
 	  }

@@ -934,6 +934,31 @@ Each command has:
 
 **Note**: Built-in TUI commands (`/settings`, `/hotkeys`, etc.) are not included. They are handled only in interactive mode and would not execute if sent via `prompt`.
 
+#### get_command_detail
+
+Fetch the raw content of a `"prompt"` or `"markdown"` sourced command by name (frontmatter stripped). Useful for expanding a command inline as part of a larger message instead of sending it as the whole prompt. Not available for `"extension"` or `"skill"` commands — use `get_skill_detail` for skills.
+
+```json
+{"type": "get_command_detail", "name": "fix-tests"}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "get_command_detail",
+  "success": true,
+  "data": {
+    "name": "fix-tests",
+    "description": "Fix failing tests",
+    "path": "/home/user/myproject/.pi/agent/prompts/fix-tests.md",
+    "content": "Run the test suite and fix any failures..."
+  }
+}
+```
+
+Returns an error if no prompt template or markdown command with that name exists.
+
 ## Events
 
 Events are streamed to stdout as JSON lines during agent operation. Events do NOT include an `id` field (only responses do).

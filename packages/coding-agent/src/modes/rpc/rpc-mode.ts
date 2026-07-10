@@ -1370,6 +1370,23 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				});
 			}
 
+			case "get_command_detail": {
+				const rawName = command.name.trim();
+				const name = rawName.startsWith("/") ? rawName.slice(1) : rawName;
+				const found =
+					targetSession.promptTemplates.find((t) => t.name === name) ??
+					targetSession.resourceLoader.getCommands().commands.find((c) => c.name === name);
+				if (!found) {
+					return error(id, "get_command_detail", `Command not found: ${name}`);
+				}
+				return success(id, "get_command_detail", {
+					name: found.name,
+					description: found.description,
+					path: found.filePath,
+					content: found.content,
+				});
+			}
+
 			case "suggest_skills": {
 				const scored = scoreSkillsByRelevance(command.query, targetSession.resourceLoader.getSkills().skills, {
 					limit: command.limit,
