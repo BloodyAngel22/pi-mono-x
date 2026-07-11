@@ -134,19 +134,18 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		"After 3+ failed attempts at a task, stop and ask the user for guidance instead of continuing to try different approaches.",
 	);
 
-	// Context compression — prevent token bloat
-	addGuideline(
-		"After 10+ tool calls in a session, consider using compress tool to summarize context and free up tokens.",
-	);
+	// Context hygiene — prevent token bloat
 	addGuideline("Avoid returning verbose traces or full file contents — return only the relevant findings or changes.");
 
 	// Always include these — order matters, higher = higher priority
 	addGuideline(
 		"When you want to ask the user a question: ALWAYS use the ask_user tool — never write a numbered/bulleted list of questions in plain text. " +
-			"The ask_user tool shows a structured UI with selectable options. Use it every time you need input from the user.",
+			"The ask_user tool shows a structured UI with selectable options. Use it every time you need input from the user. " +
+			"ONE short question per call; ask follow-ups as separate sequential calls.",
 	);
 	addGuideline(
-		"For non-trivial tasks (new features, refactoring, architecture changes): call ask_user with 2–4 option-based questions BEFORE writing any code. " +
+		"For non-trivial tasks (new features, refactoring, architecture changes): ask clarifying questions BEFORE writing any code — one ask_user call per question, sequentially; " +
+			"3–5 questions is usually enough. If more remain, ask the most important ones and resolve the rest with sensible defaults, recording them in the plan or response. " +
 			"Do not start implementing until the requirements are clear.",
 	);
 	addGuideline(
@@ -156,7 +155,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	addGuideline("Be concise in your responses");
 	addGuideline("Show file paths clearly when working with files");
 	addGuideline("Before implementing, read relevant source files and verify current library APIs with read/grep tools");
-	addGuideline("Use parallel sub-agents to research different topics simultaneously when needed");
+	addGuideline(
+		"Delegate research to parallel task sub-agents by default; use fast_context only for pinpoint symbol lookups",
+	);
 	addGuideline(
 		"Never assume library APIs, function signatures, or file structure — verify with read/grep/bash before writing code",
 	);

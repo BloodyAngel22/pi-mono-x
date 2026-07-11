@@ -17,15 +17,6 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const HEAVY_PATTERNS: RegExp[] = [
-	/\b(explore|scan|search|read|analyze|find|list|audit|review)\b.{0,30}\b(codebase|project|repository|repo|directory|all files|entire)\b/i,
-	/\b(how does|explain|understand|what is|describe)\b.{0,40}\b(architecture|design|structure|flow|work)\b/i,
-	/\bfind all\b/i,
-	/\bsecurity (audit|review|check)\b/i,
-	/\b(search|look up|find|research)\b.{0,20}\b(documentation|docs|guide|tutorial|solution|fix)\b/i,
-	/\b(latest|current|recent|updated)\b.{0,20}\b(docs|documentation|api|version|release)\b/i,
-];
-
 type TaskToolDetails = {
 	activities?: string[];
 	timedOut?: boolean;
@@ -34,48 +25,38 @@ type TaskToolDetails = {
 
 function buildGuidance(agents: SubagentConfig[]): string {
 	let guidance = `
-## Staged Research Protocol
-
-**Stage 1 — fast_context / web_search (30 seconds max):**
-Use these tools FIRST for any code search or web lookup. They are optimized for speed.
-
-**Stage 2 — Sub-agent delegation (only if Stage 1 failed):**
-Delegate to \`task\` only when fast_context/web_search did not yield enough information.
-
-**Stage 3 — Direct file reading (only when absolutely necessary):**
-Only read files directly if you know the exact path and the content is critical.
-
-## Sub-agent delegation
+## Sub-agent delegation (primary research path)
 
 You have a \`task\` tool that runs work in an isolated sub-agent with a fresh context window.
 The sub-agent has access to all built-in tools and MCP tools (web search, documentation lookup, code analysis).
 Only the final result is returned to your context, saving significant tokens.
+Sub-agents are your PRIMARY way to gather information — delegate early and in parallel.
 
-**Hard limits:**
-- NEVER spend >5 minutes on any single research task without asking user for guidance.
-- If initial approach fails after 2 attempts, ask user instead of continuing research.
-- Sub-agent results should be distilled summaries — instruct them to stop early when they have enough.
-
-**Always delegate via \`task\`:**
-- Exploring or scanning a codebase (reading 3+ files to gather information)
-- Web research (searching docs, reading pages via MCP tools like searxng/context7)
+**Delegate via \`task\` by default:**
+- Any codebase exploration or analysis touching 2+ files
+- Web research (docs, tutorials, error messages, solutions)
 - Code review or security audit (fresh, unbiased perspective)
 - Semantic code analysis via Serena MCP (references, type hierarchies, call graphs)
 - Any work where you only need the final result, not every intermediate step
-- Multiple independent tasks that can run in parallel
+- Several independent questions → several \`task\` calls IN ONE turn (they run in parallel)
 
 **Do directly (without task):**
+- Pinpoint symbol lookup → fast_context
+- One quick web query or a known URL → web_search
 - Single targeted edits when you already know which file to change
 - Short answers from already-visible context
 - Simple commands (git status, npm test)
 
+**Writing good task instructions:**
+- State the goal, the starting points (paths, symbols), and EXACTLY what to return
+- For code exploration ask for: exact file paths, line numbers, symbol names, key signatures
+- Tell the sub-agent to stop early once it has enough to answer
+
 **Critical rules:**
-- MUST use fast_context before delegating to sub-agent for code exploration.
-- NEVER read a whole codebase directly -- delegate via \`task\`
+- NEVER read a whole codebase yourself — split it into parallel \`task\` calls
 - NEVER narrate your process to the user ("I will now use a sub-agent...", "The sub-agent returned..."). Just present the result as your own answer.
 - After \`task\` returns, answer the user directly and concisely. Do not explain what the sub-agent did.
-- For web research, prefer web_search before delegating to sub-agent — web_search is faster and cheaper.
-- For independent sub-tasks, call multiple \`task\` tools -- they run in parallel.`.trim();
+- If a sub-agent fails twice, ask the user instead of retrying blindly.`.trim();
 
 	if (agents.length > 0) {
 		guidance += "\n\n**Available specialized agents:**\n";
@@ -261,14 +242,14 @@ export default function (pi: ExtensionAPI): void {
 		description: [
 			"Delegate a task to an isolated sub-agent with a fresh context window.",
 			"The sub-agent can read files, run commands, use MCP tools (web search, docs, code analysis), and return a summary.",
-			"Use for: codebase exploration, web research, code review, security audit, and any multi-file information gathering.",
+			"This is your PRIMARY tool for codebase exploration, web research, code review, security audit, and any multi-file information gathering.",
 			"Only the final result is returned to your context, saving tokens.",
 			"Multiple task calls execute in parallel.",
 		].join(" "),
-		promptSnippet: "task: Delegate heavy work (exploration, research, review) to an isolated sub-agent",
+		promptSnippet: "task: Delegate research work (exploration, web research, review) to isolated sub-agents — the default for multi-file work",
 		promptGuidelines: [
-			"Use the task tool for any work that involves reading 3+ files, web research, or code review.",
-			"Multiple task calls run in parallel -- use them for independent sub-tasks.",
+			"Delegating research to task sub-agents is the default for any exploration touching 2+ files; run independent tasks in parallel in one turn.",
+			"In plan mode, use parallel task sub-agents to collect exact file paths and line numbers for the plan.",
 		],
 		parameters: {
 			type: "object",
@@ -316,7 +297,7 @@ export default function (pi: ExtensionAPI): void {
 				// Add result size limit to sub-agent instructions to reduce token waste
 				const limitedInstructions =
 					params.instructions +
-					"\n\nIMPORTANT: Return a distilled summary (max 500 tokens). Stop early if you have enough to answer the original question. Do NOT return verbose traces or full file contents.";
+					"\n\nIMPORTANT: Return a distilled summary. Preserve ALL exact file paths, line numbers and symbol names you found — these are the payload; compress everything else. Stop early if you have enough to answer the original question. Do NOT return verbose traces or full file contents.";
 				const result = await mgr.run({
 					instructions: limitedInstructions,
 					label: params.description ?? "task",

@@ -13,16 +13,17 @@ export default function (pi: ExtensionAPI): void {
 		name: "ask_user",
 		label: "Ask user a question",
 		description:
-			"Pause and ask the user a structured question. Provide option choices when possible. " +
-			"Use when requirements are ambiguous or multiple valid approaches exist.",
+			"Pause and ask the user ONE short structured question. Provide option choices when possible. " +
+			"Use when requirements are ambiguous or multiple valid approaches exist. " +
+			"If you have several questions, call ask_user several times sequentially — NEVER bundle multiple questions into one call.",
 		promptSnippet:
-			"ask_user: Pause and ask the user a structured question with choices before proceeding",
+			"ask_user: Ask the user ONE short question with choices; call repeatedly for multiple questions",
 		parameters: {
 			type: "object",
 			properties: {
 				question: {
 					type: "string",
-					description: "The question to ask the user. Markdown is supported.",
+					description: "A single short question (one decision per call). Markdown is supported.",
 				},
 				options: {
 					type: "array",

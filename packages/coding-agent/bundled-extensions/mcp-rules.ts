@@ -1,41 +1,43 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const GUIDANCE = `
-## MCP Tool Selection Rules
+## Search & Docs Tool Selection Rules
 
-You have several MCP servers available. Follow these rules to choose the right one:
-
-### Web search
-1. **searxng** \`searxng_web_search\` — use by default for all web searches.
-   - Latest news, tutorials, blog posts, error messages, Stack Overflow answers
-   - When you need current information not in your training data
-   - Supports time_range ("day", "month", "year") — use it when recency matters
-2. **ddg-search** — fallback only if searxng returns an error or no results.
-3. **searxng** \`web_url_read\` — after finding a URL via search, use this to read the full page content as markdown. Prefer this over fetching raw HTML yourself.
+Follow these rules to choose the right search/docs tool:
 
 ### Library & framework documentation
-1. **context7** \`resolve-library-id\` + \`query-docs\` — always use for:
+1. **context7** \`resolve-library-id\` + \`query-docs\` — always use FIRST for:
    - API reference, function signatures, configuration options
    - "How do I use X in library Y" questions
    - Version-specific docs, migration guides
    - Any question about a specific package/SDK/framework
    - Use BEFORE writing code that depends on a library
-2. Do NOT use searxng/ddg for library docs — context7 has structured, up-to-date docs with code examples.
+2. Do NOT use web search for library docs — context7 has structured, up-to-date docs with code examples.
+
+### Web search & URL reads
+1. Built-in \`web_search\` — the DEFAULT for all web searches and URL fetches (use mode=url for known URLs). It is faster and cheaper than MCP search servers.
+2. **searxng** \`searxng_web_search\` / \`web_url_read\` — FALLBACK ONLY when web_search errors, stays blocked by bot protection after its headless fallback, or returns nothing useful. Exception: searxng supports time_range ("day", "month", "year") — reach for it directly when strict recency filtering is critical.
+3. **ddg-search** — last resort if both web_search and searxng failed.
+
+### Deep research
+- \`deep_research\` or a \`task\` sub-agent — for multi-page/multi-source research where one search is not enough.
+- One quick question → web_search, never deep_research.
 
 ### Decision tree
 \`\`\`
 Need docs for a specific library/framework?
   └─ YES → context7
-Need current web info / search results?
-  └─ YES → searxng (fallback: ddg-search)
-      └─ Found a promising URL? → web_url_read to get full content
+Need current web info / read a URL?
+  └─ YES → web_search (fallback: searxng → ddg-search)
+Broad multi-source research?
+  └─ YES → deep_research or task sub-agent
 \`\`\`
 
 ### Efficiency rules
 - For library questions, call context7 \`resolve-library-id\` first, then \`query-docs\` with a specific query.
 - For web search, prefer specific queries over broad ones — fewer results but more relevant.
-- Read the full page with \`web_url_read\` only when the snippet is insufficient.
-- Do NOT call both context7 and searxng for the same question — pick one based on the rules above.
+- Fetch the full page (web_search mode=url) only when the snippet is insufficient.
+- Do NOT call both context7 and web search for the same question — pick one based on the rules above.
 `.trim();
 
 export default function (pi: ExtensionAPI): void {

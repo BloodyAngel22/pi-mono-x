@@ -315,6 +315,7 @@ export function createWebSearchToolDefinition(
 			"Web search or direct URL fetch without MCP. Uses the configured webSearch.searchUrl endpoint from settings.json, or DuckDuckGo HTML search by default. Sends browser-like headers, retries transient failures, and detects common bot-protection challenges (Cloudflare, Akamai, PerimeterX, DataDome, captchas), optionally falling back to a headless browser when webSearch.headlessFallback is enabled.",
 		promptSnippet: "Web search or URL fetch without MCP, with bot-protection handling",
 		promptGuidelines: [
+			"web_search takes priority over MCP search servers (searxng, ddg-search) — use those only as fallback when web_search fails or is blocked.",
 			"MUST use web_search for web lookups instead of delegating to sub-agent — it is faster and cheaper.",
 			"Only delegate to sub-agent if web_search is unavailable or the task requires deep multi-page research.",
 			"Use mode=url for known URLs; otherwise pass a concise search query. Prefer 1 web_search over multiple MCP calls.",
