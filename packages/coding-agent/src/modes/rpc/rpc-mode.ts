@@ -75,6 +75,18 @@ interface McpSessionServerInfo {
 	key: string;
 }
 
+/**
+ * Compares two cwd strings after path normalization, so a same-project
+ * `create_session`/`fork`/`clone` can safely reuse the source session's
+ * `resourceLoader` (see call sites below) instead of re-running every
+ * extension's factory from scratch — some extensions (e.g. an OmniRoute-style
+ * provider registration) do a network fetch on load, which is otherwise
+ * repeated for every new tab even though nothing about the project changed.
+ */
+function sameCwd(a: string, b: string): boolean {
+	return path.resolve(a) === path.resolve(b);
+}
+
 function getMcpSharedClientsRegistry(): Map<string, McpSharedEntry> {
 	const g = globalThis as unknown as Record<symbol, Map<string, McpSharedEntry> | undefined>;
 	return (g[MCP_SHARED_CLIENTS_KEY] as Map<string, McpSharedEntry> | undefined) ?? new Map();
@@ -93,6 +105,15 @@ export type {
 	RpcResponse,
 	RpcSessionState,
 } from "./rpc-types.js";
+
+// Every streaming delta event carries `assistantMessageEvent.partial` — the
+// FULL accumulated AssistantMessage so far (see pi-ai's AssistantMessageEvent).
+// Serializing that snapshot to stdout on every token is O(n²) CPU per turn,
+// and each line then costs an IPC event in the host UI. pi-pine renders the
+// complete text on message_end anyway, so by default message_update events
+// are not emitted at all. Set PI_RPC_STREAM_UPDATES=1 to restore per-token
+// streaming for clients that want it.
+const STREAM_MESSAGE_UPDATES = process.env.PI_RPC_STREAM_UPDATES === "1";
 
 function sanitizeRpcEvent(
 	event: AgentSessionEvent,
@@ -506,6 +527,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		const existing = sessionSubscriptions.get(sessionId);
 		existing?.();
 		const unsubscribe = target.subscribe((event) => {
+			if (!STREAM_MESSAGE_UPDATES && event.type === "message_update") return;
 			output({ ...sanitizeRpcEvent(event), sessionId });
 		});
 		sessionSubscriptions.set(sessionId, unsubscribe);
@@ -731,6 +753,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				sessionManager,
 				modelRegistry: baseSession.modelRegistry,
 				settingsManager: baseSession.settingsManager,
+				resourceLoader: sameCwd(effectiveCwd, baseSession.activeCwd) ? baseSession.resourceLoader : undefined,
 				model: baseSession.model,
 				thinkingLevel: baseSession.thinkingLevel,
 				tools: baseSession.getActiveToolNames(),
@@ -1193,6 +1216,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					sessionManager: nextManager,
 					modelRegistry: targetSession.modelRegistry,
 					settingsManager: targetSession.settingsManager,
+					// fork always keeps the source session's cwd, so its already-loaded
+					// extensions (skills, providers, etc.) are still valid — no need to
+					// re-run every extension factory (see sameCwd doc comment above).
+					resourceLoader: targetSession.resourceLoader,
 					model: targetSession.model,
 					thinkingLevel: targetSession.thinkingLevel,
 					tools: targetSession.getActiveToolNames(),
@@ -1221,6 +1248,8 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					sessionManager: nextManager,
 					modelRegistry: targetSession.modelRegistry,
 					settingsManager: targetSession.settingsManager,
+					// clone always keeps the source session's cwd — see fork above.
+					resourceLoader: targetSession.resourceLoader,
 					model: targetSession.model,
 					thinkingLevel: targetSession.thinkingLevel,
 					tools: targetSession.getActiveToolNames(),

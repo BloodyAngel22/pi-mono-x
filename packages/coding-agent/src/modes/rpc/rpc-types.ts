@@ -198,7 +198,10 @@ export interface RpcMcpToolInfo {
 
 export interface RpcMcpServerStatus {
 	name: string;
-	status: "connected" | "connecting" | "retrying" | "error" | "disabled";
+	/** "idle" — tools are registered from the on-disk schema cache, but the
+	 * server process itself hasn't been spawned yet (lazy connect on first
+	 * tool call). */
+	status: "connected" | "connecting" | "retrying" | "error" | "disabled" | "idle";
 	error?: string;
 	attempt?: number;
 	nextRetryAt?: number;
