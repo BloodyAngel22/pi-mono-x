@@ -80,16 +80,33 @@ The LLM automatically sees available agents in the system prompt and can invoke 
 task(agent: "security-reviewer", instructions: "Review the changes in src/auth/")
 ```
 
-List available agents with `/agents`.
+List available agents with `/agents`. Agents can also be listed/created/edited/deleted programmatically via the `list_agents` / `get_agent` / `save_agent` / `delete_agent` RPC commands (used by GUI clients such as pi-pine's Agents panel) -- edits immediately update the in-memory agent list used by `task(agent: "...")`, no session restart needed.
 
 ## Commands
 
 - `/tasks` -- show running and recent sub-agent tasks with status, duration, and token savings
 - `/agents` -- list available custom agents
 
+## Task statuses
+
+A task's `status` transitions through: `queued` (waiting for a concurrency slot) -> `running` -> `done` / `error` / `background`. Tasks are visible (including while `queued`) as soon as they're created, not just once they start running.
+
+## Managing running tasks
+
+- `cancel_task(taskId)` -- cancel a running or queued task. The `taskId` is returned in the `task` tool's result `details.taskId`.
+- `background_task(taskId)` -- let a running task keep working without blocking on its result.
+
+These are also exposed as `cancel_task` / `background_task` RPC commands for GUI clients.
+
 ## Concurrency
 
-Up to 3 sub-agents can run in parallel. Additional tasks wait until a slot opens.
+Up to 3 sub-agents run in parallel by default. Additional tasks are queued (visible with `status: "queued"`) until a slot opens. The limit and the default per-task timeout (5 minutes) are configurable at runtime via the `set_subagent_concurrency` / `set_subagent_timeout` RPC commands (1-10 concurrent tasks, 30s-30min timeout).
+
+## Tool-call transcript
+
+Each task's result carries a structured `toolCalls` list (in addition to the older `activities` string summary) with one entry per tool call the sub-agent made: `{ toolCallId, toolName, args, status, output, startedAt, completedAt }`. This lets clients render the sub-agent's own tool calls live, not just a short trailing summary. The list is capped (newest completed entries evicted first; still-running entries are never evicted).
+
+Recursive delegation is intentionally unsupported: a sub-agent's own tool set never includes `task`, so sub-agents cannot spawn further sub-agents.
 
 ## Token savings
 

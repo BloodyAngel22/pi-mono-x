@@ -32,7 +32,13 @@ import { takeOverStdout, writeRawStdout } from "../../core/output-guard.js";
 import { createAgentSession } from "../../core/sdk.js";
 import { SessionManager } from "../../core/session-manager.js";
 import { scoreSkillsByRelevance } from "../../core/skills.js";
-import { getGlobalSubagentManager } from "../../core/subagent/index.js";
+import {
+	agentFilePath,
+	deleteAgentFile,
+	getGlobalSubagentManager,
+	loadAgents,
+	writeAgentFile,
+} from "../../core/subagent/index.js";
 import { createWebSearchToolDefinition } from "../../core/tools/index.js";
 import { getTextOutput } from "../../core/tools/render-utils.js";
 import { stripFrontmatter } from "../../utils/frontmatter.js";
@@ -521,6 +527,8 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		pendingMessageCount: target.pendingMessageCount,
 		cwd: target.activeCwd,
 		planMode: target.planMode.state,
+		subagentConcurrencyLimit: getGlobalSubagentManager()?.getConcurrencyLimit() ?? 3,
+		subagentDefaultTimeoutMs: getGlobalSubagentManager()?.getDefaultTimeout() ?? 5 * 60 * 1000,
 	});
 
 	function subscribeSession(sessionId: string, target: AgentSession): void {
@@ -1441,6 +1449,85 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				const mgr = getGlobalSubagentManager();
 				const tasks = mgr ? [...mgr.tasks.values()] : [];
 				return success(id, "get_subagent_tasks", { tasks });
+			}
+
+			case "cancel_task": {
+				const mgr = getGlobalSubagentManager();
+				const ok = mgr?.cancelTask(command.taskId) ?? false;
+				return ok
+					? success(id, "cancel_task")
+					: error(id, "cancel_task", `Unknown or already-finished task: ${command.taskId}`);
+			}
+
+			case "background_task": {
+				const mgr = getGlobalSubagentManager();
+				const ok = mgr?.backgroundTask(command.taskId) ?? false;
+				return ok
+					? success(id, "background_task")
+					: error(id, "background_task", `Unknown or not-running task: ${command.taskId}`);
+			}
+
+			case "set_subagent_concurrency": {
+				getGlobalSubagentManager()?.setConcurrencyLimit(command.limit);
+				return success(id, "set_subagent_concurrency");
+			}
+
+			case "set_subagent_timeout": {
+				getGlobalSubagentManager()?.setDefaultTimeout(command.timeoutMs);
+				return success(id, "set_subagent_timeout");
+			}
+
+			// =================================================================
+			// Custom sub-agent definitions (.pi/agents/*.md)
+			// =================================================================
+
+			case "list_agents": {
+				const mgr = getGlobalSubagentManager();
+				return success(id, "list_agents", { agents: mgr?.getAgents() ?? [] });
+			}
+
+			case "get_agent": {
+				const mgr = getGlobalSubagentManager();
+				const agent = mgr?.getAgents().find((a) => a.name === command.name) ?? null;
+				return success(id, "get_agent", { agent });
+			}
+
+			case "save_agent": {
+				const mgr = getGlobalSubagentManager();
+				const cwd = targetSession.activeCwd;
+				const agentDir = getAgentDir();
+
+				if (command.originalName && command.originalName !== command.name) {
+					const oldAgent = mgr?.getAgents().find((a) => a.name === command.originalName);
+					if (oldAgent) deleteAgentFile(oldAgent.sourcePath);
+				}
+
+				const filePath = agentFilePath(agentDir, cwd, command.name, command.source);
+				writeAgentFile(filePath, {
+					name: command.name,
+					description: command.description,
+					systemPrompt: command.systemPrompt,
+					tools: command.tools,
+					mcpTools: command.mcpTools,
+					model: command.model,
+				});
+
+				const agents = loadAgents(cwd, agentDir);
+				mgr?.setAgents(agents);
+				return success(id, "save_agent", { agents });
+			}
+
+			case "delete_agent": {
+				const mgr = getGlobalSubagentManager();
+				const cwd = targetSession.activeCwd;
+				const agentDir = getAgentDir();
+
+				const existing = mgr?.getAgents().find((a) => a.name === command.name && a.source === command.source);
+				if (existing) deleteAgentFile(existing.sourcePath);
+
+				const agents = loadAgents(cwd, agentDir);
+				mgr?.setAgents(agents);
+				return success(id, "delete_agent", { agents });
 			}
 
 			default: {

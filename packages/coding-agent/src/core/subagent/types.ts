@@ -6,7 +6,7 @@ import type { PermissionAskCallback } from "../permissions.js";
 // Task lifecycle
 // ============================================================================
 
-export type SubagentTaskStatus = "pending" | "running" | "done" | "error" | "background";
+export type SubagentTaskStatus = "pending" | "queued" | "running" | "done" | "error" | "background";
 
 export interface SubagentTask {
 	id: string;
@@ -26,6 +26,21 @@ export interface SubagentTask {
 	interrupted?: boolean;
 	/** Last 5 human-readable activity descriptions (newest last). */
 	recentActivities?: string[];
+	/** Structured tool-call transcript (newest last, capped). */
+	toolCalls?: SubagentToolCallEntry[];
+	/** When the task entered the concurrency queue (before it started running). */
+	queuedAt?: number;
+}
+
+/** One entry in a sub-agent's own tool-call transcript. */
+export interface SubagentToolCallEntry {
+	toolCallId: string;
+	toolName: string;
+	args?: Record<string, unknown>;
+	status: "running" | "done" | "error";
+	output?: string;
+	startedAt: number;
+	completedAt?: number;
 }
 
 // ============================================================================
@@ -66,9 +81,14 @@ export interface SubagentRunOptions {
 	timeout?: number;
 	signal?: AbortSignal;
 	onProgress?: (chunk: string) => void;
+	/** Called whenever a structured tool-call entry in the sub-agent's own transcript changes. */
+	onToolCallUpdate?: (entry: SubagentToolCallEntry) => void;
+	/** Called whenever the task's own status transitions (e.g. queued → running). */
+	onStatusChange?: (task: SubagentTask) => void;
 }
 
 export interface SubagentResult {
+	taskId: string;
 	text: string;
 	inputTokens: number;
 	outputTokens: number;
@@ -84,6 +104,7 @@ export interface SubagentResult {
 // ============================================================================
 
 export type SubagentEvent =
+	| { type: "task_queued"; task: SubagentTask }
 	| { type: "task_start"; task: SubagentTask }
 	| { type: "task_progress"; taskId: string; chunk: string }
 	| { type: "task_complete"; task: SubagentTask }

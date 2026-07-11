@@ -2,6 +2,8 @@ import type {
 	ExtensionAPI,
 	SubagentConfig,
 	SubagentSessionFactory,
+	SubagentTask,
+	SubagentToolCallEntry,
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
@@ -18,7 +20,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 type TaskToolDetails = {
+	taskId?: string;
+	status?: string;
+	queuedAt?: number;
 	activities?: string[];
+	toolCalls?: SubagentToolCallEntry[];
 	timedOut?: boolean;
 	interrupted?: boolean;
 };
@@ -56,7 +62,11 @@ Sub-agents are your PRIMARY way to gather information — delegate early and in 
 - NEVER read a whole codebase yourself — split it into parallel \`task\` calls
 - NEVER narrate your process to the user ("I will now use a sub-agent...", "The sub-agent returned..."). Just present the result as your own answer.
 - After \`task\` returns, answer the user directly and concisely. Do not explain what the sub-agent did.
-- If a sub-agent fails twice, ask the user instead of retrying blindly.`.trim();
+- If a sub-agent fails twice, ask the user instead of retrying blindly.
+
+**Managing running tasks:**
+- \`cancel_task(taskId)\` stops a sub-agent you no longer need (its taskId is in the \`task\` result).
+- \`background_task(taskId)\` lets a long-running sub-agent keep working without blocking on it.`.trim();
 
 	if (agents.length > 0) {
 		guidance += "\n\n**Available specialized agents:**\n";
@@ -284,16 +294,18 @@ export default function (pi: ExtensionAPI): void {
 
 			let agentConfig: SubagentConfig | undefined;
 			if (params.agent) {
-				agentConfig = agents.find((a) => a.name === params.agent);
+				const knownAgents = mgr.getAgents();
+				agentConfig = knownAgents.find((a) => a.name === params.agent);
 				if (!agentConfig) {
 					return {
-						content: [{ type: "text" as const, text: `Unknown agent: ${params.agent}. Available: ${agents.map((a) => a.name).join(", ") || "none"}` }],
+						content: [{ type: "text" as const, text: `Unknown agent: ${params.agent}. Available: ${knownAgents.map((a) => a.name).join(", ") || "none"}` }],
 					};
 				}
 			}
 
 			try {
 				const activities: string[] = [];
+				let toolCalls: SubagentToolCallEntry[] = [];
 				// Add result size limit to sub-agent instructions to reduce token waste
 				const limitedInstructions =
 					params.instructions +
@@ -312,7 +324,27 @@ export default function (pi: ExtensionAPI): void {
 						const recent = activities.slice(-5);
 						onUpdate?.({
 							content: [{ type: "text" as const, text: "" }],
-							details: { activities: recent } satisfies TaskToolDetails,
+							details: { activities: recent, toolCalls } satisfies TaskToolDetails,
+						});
+					},
+					onToolCallUpdate: (entry: SubagentToolCallEntry) => {
+						const idx = toolCalls.findIndex((e) => e.toolCallId === entry.toolCallId);
+						toolCalls = idx === -1 ? [...toolCalls, entry] : toolCalls.map((e, i) => (i === idx ? entry : e));
+						onUpdate?.({
+							content: [{ type: "text" as const, text: "" }],
+							details: { activities: activities.slice(-5), toolCalls } satisfies TaskToolDetails,
+						});
+					},
+					onStatusChange: (task: SubagentTask) => {
+						onUpdate?.({
+							content: [{ type: "text" as const, text: "" }],
+							details: {
+								taskId: task.id,
+								status: task.status,
+								queuedAt: task.queuedAt,
+								activities: activities.slice(-5),
+								toolCalls,
+							} satisfies TaskToolDetails,
 						});
 					},
 				});
@@ -327,6 +359,7 @@ export default function (pi: ExtensionAPI): void {
 				return {
 					content: [{ type: "text" as const, text: outputText }],
 					details: {
+						taskId: result.taskId,
 						description: params.description,
 						cwd,
 						inputTokens: result.inputTokens,
@@ -335,6 +368,7 @@ export default function (pi: ExtensionAPI): void {
 						timedOut: result.timedOut,
 						interrupted: result.interrupted,
 						activities: activities.slice(-5),
+						toolCalls,
 					},
 				};
 			} catch (err: unknown) {
@@ -343,6 +377,54 @@ export default function (pi: ExtensionAPI): void {
 					content: [{ type: "text" as const, text: `Sub-agent error: ${message}` }],
 				};
 			}
+		},
+	});
+
+	// Register the cancel_task tool
+	pi.registerTool({
+		name: "cancel_task",
+		label: "Cancel sub-agent task",
+		description: "Cancel a running or queued sub-agent task by its taskId (returned in the task tool's result details).",
+		parameters: {
+			type: "object",
+			properties: { taskId: { type: "string", description: "The taskId to cancel" } },
+			required: ["taskId"],
+		} as any,
+		execute: async (_toolCallId: string, params: any) => {
+			const mgr = getManager();
+			const ok = mgr.cancelTask(params.taskId);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: ok ? `Task ${params.taskId} cancelled.` : `Task ${params.taskId} not found or already finished.`,
+					},
+				],
+			};
+		},
+	});
+
+	// Register the background_task tool
+	pi.registerTool({
+		name: "background_task",
+		label: "Background sub-agent task",
+		description: "Let a running sub-agent task keep working without blocking on its result.",
+		parameters: {
+			type: "object",
+			properties: { taskId: { type: "string", description: "The taskId to background" } },
+			required: ["taskId"],
+		} as any,
+		execute: async (_toolCallId: string, params: any) => {
+			const mgr = getManager();
+			const ok = mgr.backgroundTask(params.taskId);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: ok ? `Task ${params.taskId} moved to background.` : `Task ${params.taskId} not found or not running.`,
+					},
+				],
+			};
 		},
 	});
 
@@ -357,6 +439,7 @@ export default function (pi: ExtensionAPI): void {
 		const agentDir = join(homedir(), ".pi", "agent");
 		const cwd: string = ctx?.cwd ?? process.cwd();
 		agents = loadAgents(cwd, agentDir);
+		mgr.setAgents(agents);
 
 		// Collect MCP tool definitions from the extension runner
 		try {
@@ -371,7 +454,7 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.on("before_agent_start", async (event: any): Promise<any> => {
-		const guidance = buildGuidance(agents);
+		const guidance = buildGuidance(manager?.getAgents() ?? agents);
 		return {
 			systemPrompt: event.systemPrompt + "\n\n" + guidance,
 		};
@@ -452,7 +535,8 @@ export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("agents", {
 		description: "List available specialized sub-agents",
 		handler: async (_args: string, ctx: any) => {
-			if (agents.length === 0) {
+			const currentAgents = manager?.getAgents() ?? agents;
+			if (currentAgents.length === 0) {
 				ctx.ui.notify("No custom agents found. Create .md files in .pi/agents/ or ~/.pi/agent/agents/", "info");
 				return;
 			}
@@ -469,7 +553,7 @@ export default function (pi: ExtensionAPI): void {
 						lines.push(borderFg("|") + theme.fg("accent", title) + " ".repeat(Math.max(0, availWidth - 2 - title.length)) + borderFg("|"));
 						lines.push(borderFg("+" + "-".repeat(availWidth - 2) + "+"));
 
-						for (const agent of agents) {
+						for (const agent of currentAgents) {
 							const name = ` ${agent.name} (${agent.source})`;
 							const namePad = Math.max(0, availWidth - 3 - name.length);
 							lines.push(borderFg("|") + " " + theme.fg("accent", name) + " ".repeat(namePad) + borderFg("|"));

@@ -3,11 +3,13 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "../extensions/types.js";
 import type { PermissionAskCallback } from "../permissions.js";
 import type {
+	SubagentConfig,
 	SubagentEvent,
 	SubagentEventListener,
 	SubagentResult,
 	SubagentRunOptions,
 	SubagentTask,
+	SubagentToolCallEntry,
 } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -15,6 +17,12 @@ const MAX_CONCURRENT_TASKS = 3;
 const MAX_RECENT_ACTIVITIES = 5;
 const MAX_PARTIAL_RESULT_CHARS = 6000;
 const MAX_PARTIAL_TOOL_SNIPPET_CHARS = 1200;
+const MAX_TOOL_CALL_ENTRIES = 20;
+const MIN_CONCURRENCY_LIMIT = 1;
+const MAX_CONCURRENCY_LIMIT = 10;
+const MIN_TIMEOUT_MS = 30 * 1000;
+const MAX_TIMEOUT_MS = 30 * 60 * 1000;
+const QUEUE_POLL_INTERVAL_MS = 200;
 
 function compactWhitespace(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
@@ -23,6 +31,28 @@ function compactWhitespace(text: string): string {
 function truncateText(text: string, maxChars: number): string {
 	if (text.length <= maxChars) return text;
 	return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+/** Best-effort text extraction from a tool result/partialResult of unknown shape. */
+function extractResultText(value: unknown): string {
+	if (value == null) return "";
+	if (typeof value === "string") return value;
+	if (typeof value === "object" && "content" in (value as Record<string, unknown>)) {
+		const content = (value as { content?: unknown }).content;
+		if (Array.isArray(content)) {
+			return content
+				.filter((c): c is { type: string; text?: string } => typeof c === "object" && c !== null && "type" in c)
+				.filter((c) => c.type === "text" && c.text)
+				.map((c) => c.text ?? "")
+				.join("\n")
+				.trim();
+		}
+	}
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
 }
 
 function formatToolActivity(toolName: string, args: Record<string, unknown>): string {
@@ -77,7 +107,15 @@ export type SubagentSessionFactory = (options: {
 	getMessages(): SubagentSessionMessage[];
 	subscribe(listener: (event: { type: string; text?: string }) => void): () => void;
 	subscribeAgentEvents?(
-		listener: (event: { type: string; toolName?: string; args?: Record<string, unknown> }) => void,
+		listener: (event: {
+			type: string;
+			toolCallId?: string;
+			toolName?: string;
+			args?: Record<string, unknown>;
+			result?: unknown;
+			partialResult?: unknown;
+			isError?: boolean;
+		}) => void,
 	): () => void;
 	abort?(): void;
 }>;
@@ -88,6 +126,9 @@ export class SubagentManager {
 	private _listeners: SubagentEventListener[] = [];
 	private _runningCount = 0;
 	private _sessionFactory: SubagentSessionFactory;
+	private _concurrencyLimit = MAX_CONCURRENT_TASKS;
+	private _defaultTimeoutMs = DEFAULT_TIMEOUT_MS;
+	private _agents: SubagentConfig[] = [];
 
 	constructor(sessionFactory: SubagentSessionFactory) {
 		this._sessionFactory = sessionFactory;
@@ -99,6 +140,30 @@ export class SubagentManager {
 
 	get runningCount(): number {
 		return this._runningCount;
+	}
+
+	setConcurrencyLimit(limit: number): void {
+		this._concurrencyLimit = Math.min(MAX_CONCURRENCY_LIMIT, Math.max(MIN_CONCURRENCY_LIMIT, Math.round(limit)));
+	}
+
+	getConcurrencyLimit(): number {
+		return this._concurrencyLimit;
+	}
+
+	setDefaultTimeout(ms: number): void {
+		this._defaultTimeoutMs = Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, Math.round(ms)));
+	}
+
+	getDefaultTimeout(): number {
+		return this._defaultTimeoutMs;
+	}
+
+	setAgents(agents: SubagentConfig[]): void {
+		this._agents = agents;
+	}
+
+	getAgents(): SubagentConfig[] {
+		return this._agents;
 	}
 
 	onEvent(listener: SubagentEventListener): () => void {
@@ -120,23 +185,19 @@ export class SubagentManager {
 	}
 
 	async run(options: SubagentRunOptions): Promise<SubagentResult> {
-		while (this._runningCount >= MAX_CONCURRENT_TASKS) {
-			await new Promise((r) => setTimeout(r, 200));
-		}
-
 		const taskId = randomUUID().slice(0, 8);
 		const task: SubagentTask = {
 			id: taskId,
 			label: options.label,
-			status: "running",
+			status: "queued",
 			startedAt: Date.now(),
+			queuedAt: Date.now(),
 			agentName: options.agent?.name,
 			inputTokens: 0,
 			outputTokens: 0,
 			savedTokens: 0,
 		};
 		this._tasks.set(taskId, task);
-		this._runningCount++;
 
 		const abortController = new AbortController();
 		this._abortControllers.set(taskId, abortController);
@@ -151,10 +212,45 @@ export class SubagentManager {
 			}
 		}
 
-		const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
+		this._emit({ type: "task_queued", task: { ...task } });
+		options.onStatusChange?.({ ...task });
+
+		const failQueuedCancellation = (): never => {
+			const message =
+				abortController.signal.reason instanceof Error
+					? abortController.signal.reason.message
+					: "Task cancelled by user";
+			task.status = "error";
+			task.completedAt = Date.now();
+			task.error = message;
+			this._abortControllers.delete(taskId);
+			this._emit({ type: "task_error", taskId, error: message });
+			throw new Error(message);
+		};
+
+		// Wait for a concurrency slot, reacting immediately to cancellation instead of
+		// waiting out the next poll tick.
+		while (this._runningCount >= this._concurrencyLimit) {
+			if (abortController.signal.aborted) failQueuedCancellation();
+			await Promise.race([
+				new Promise((r) => setTimeout(r, QUEUE_POLL_INTERVAL_MS)),
+				new Promise<void>((resolve) =>
+					abortController.signal.addEventListener("abort", () => resolve(), { once: true }),
+				),
+			]);
+		}
+
+		if (abortController.signal.aborted) failQueuedCancellation();
+
+		task.status = "running";
+		task.startedAt = Date.now();
+		this._runningCount++;
+
+		const timeoutMs = options.timeout ?? this._defaultTimeoutMs;
 		const timer = setTimeout(() => abortController.abort(new Error("Sub-agent timed out")), timeoutMs);
 
 		this._emit({ type: "task_start", task: { ...task } });
+		options.onStatusChange?.({ ...task });
 
 		try {
 			const result = await this._execute(options, abortController.signal, task);
@@ -169,7 +265,7 @@ export class SubagentManager {
 			task.interrupted = result.interrupted;
 
 			this._emit({ type: "task_complete", task: { ...task } });
-			return result;
+			return { ...result, taskId };
 		} catch (err: unknown) {
 			const message = err instanceof Error ? err.message : String(err);
 			task.status = "error";
@@ -204,13 +300,19 @@ export class SubagentManager {
 	}
 
 	getActiveTasks(): SubagentTask[] {
-		return [...this._tasks.values()].filter((t) => t.status === "running" || t.status === "background");
+		return [...this._tasks.values()].filter(
+			(t) => t.status === "running" || t.status === "background" || t.status === "queued",
+		);
 	}
 
 	getRecentTasks(maxAge: number = 60_000): SubagentTask[] {
 		const cutoff = Date.now() - maxAge;
 		return [...this._tasks.values()].filter(
-			(t) => t.status === "running" || t.status === "background" || (t.completedAt && t.completedAt > cutoff),
+			(t) =>
+				t.status === "running" ||
+				t.status === "background" ||
+				t.status === "queued" ||
+				(t.completedAt && t.completedAt > cutoff),
 		);
 	}
 
@@ -218,7 +320,7 @@ export class SubagentManager {
 		options: SubagentRunOptions,
 		signal: AbortSignal,
 		task: SubagentTask,
-	): Promise<SubagentResult> {
+	): Promise<Omit<SubagentResult, "taskId">> {
 		let systemPrompt: string;
 		if (options.agent?.systemPrompt) {
 			systemPrompt =
@@ -237,6 +339,8 @@ export class SubagentManager {
 			"Use the returned files/ranges to choose targeted read calls. Avoid long broad exploration with ls/find/grep/read before fast_context." +
 			"\nWeb fetch policy: use web_search for quick web lookups or URL reads when MCP web tools are unavailable, slow, or unnecessary.";
 
+		// NOTE: recursive sub-agents are intentionally unsupported — "task" is deliberately
+		// absent from this default tool set and must not be added without a depth-limit design.
 		const toolNames = options.tools ??
 			options.agent?.tools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "fast_context", "web_search"];
 
@@ -279,9 +383,53 @@ export class SubagentManager {
 			options.onProgress?.(activity);
 		};
 
+		const upsertToolCallEntry = (
+			toolCallId: string | undefined,
+			patch: Partial<SubagentToolCallEntry> & { toolName?: string },
+		): void => {
+			if (!toolCallId) return;
+			if (!task.toolCalls) task.toolCalls = [];
+			let entry = task.toolCalls.find((e) => e.toolCallId === toolCallId);
+			if (!entry) {
+				entry = {
+					toolCallId,
+					toolName: patch.toolName ?? "unknown",
+					status: "running",
+					startedAt: Date.now(),
+				};
+				task.toolCalls.push(entry);
+				// Evict oldest completed entries first, never a still-running one.
+				if (task.toolCalls.length > MAX_TOOL_CALL_ENTRIES) {
+					const completedIdx = task.toolCalls.findIndex((e) => e.status !== "running");
+					if (completedIdx !== -1) task.toolCalls.splice(completedIdx, 1);
+				}
+			}
+			Object.assign(entry, patch);
+			options.onToolCallUpdate?.({ ...entry });
+		};
+
 		const unsubscribeAgent = session.subscribeAgentEvents?.((event) => {
 			if (event.type === "tool_execution_start") {
 				reportToolActivity(event.toolName, event.args);
+				upsertToolCallEntry(event.toolCallId, {
+					toolName: event.toolName,
+					args: event.args,
+					status: "running",
+					startedAt: Date.now(),
+				});
+			} else if (event.type === "tool_execution_update") {
+				upsertToolCallEntry(event.toolCallId, {
+					output: truncateText(
+						compactWhitespace(extractResultText(event.partialResult)),
+						MAX_PARTIAL_TOOL_SNIPPET_CHARS,
+					),
+				});
+			} else if (event.type === "tool_execution_end") {
+				upsertToolCallEntry(event.toolCallId, {
+					status: event.isError ? "error" : "done",
+					output: truncateText(compactWhitespace(extractResultText(event.result)), MAX_PARTIAL_TOOL_SNIPPET_CHARS),
+					completedAt: Date.now(),
+				});
 			}
 		});
 
@@ -332,7 +480,7 @@ export class SubagentManager {
 			return `Partial findings before timeout/cancellation. The sub-agent did not produce a final summary, so this is compacted from completed tool calls.\n\n${truncateText(sections.join("\n\n"), MAX_PARTIAL_RESULT_CHARS)}`;
 		};
 
-		const buildResultFromMessages = (interrupted = false): SubagentResult | undefined => {
+		const buildResultFromMessages = (interrupted = false): Omit<SubagentResult, "taskId"> | undefined => {
 			const messages = session.getMessages();
 			let inputTokens = 0;
 			let outputTokens = 0;

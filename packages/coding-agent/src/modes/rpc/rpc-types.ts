@@ -14,7 +14,7 @@ import type { FastContextResult } from "../../core/context-search.js";
 import type { PlanModeState } from "../../core/plan-mode.js";
 import type { SessionTreeNode } from "../../core/session-manager.js";
 import type { SourceInfo } from "../../core/source-info.js";
-import type { SubagentTask } from "../../core/subagent/types.js";
+import type { SubagentConfig, SubagentTask } from "../../core/subagent/types.js";
 import type { WebSearchToolDetails } from "../../core/tools/index.js";
 
 // ============================================================================
@@ -124,6 +124,28 @@ export type RpcCommand =
 
 		// Sub-agents
 		| { id?: string; type: "get_subagent_tasks" }
+		| { id?: string; type: "cancel_task"; taskId: string }
+		| { id?: string; type: "background_task"; taskId: string }
+		| { id?: string; type: "set_subagent_concurrency"; limit: number }
+		| { id?: string; type: "set_subagent_timeout"; timeoutMs: number }
+
+		// Custom sub-agent definitions (.pi/agents/*.md)
+		| { id?: string; type: "list_agents" }
+		| { id?: string; type: "get_agent"; name: string }
+		| {
+				id?: string;
+				type: "save_agent";
+				name: string;
+				description: string;
+				systemPrompt: string;
+				tools?: string[];
+				mcpTools?: string[];
+				model?: string;
+				source: "project" | "user";
+				/** Present when renaming an existing agent — the old file is removed after the new one is written. */
+				originalName?: string;
+		  }
+		| { id?: string; type: "delete_agent"; name: string; source: "project" | "user" }
 
 		// Multi-session
 		| {
@@ -185,6 +207,8 @@ export interface RpcSessionState {
 	pendingMessageCount: number;
 	cwd?: string;
 	planMode: PlanModeState;
+	subagentConcurrencyLimit: number;
+	subagentDefaultTimeoutMs: number;
 }
 
 // ============================================================================
@@ -452,6 +476,16 @@ export type RpcResponse =
 			success: true;
 			data: { tasks: SubagentTask[] };
 	  }
+	| { id?: string; type: "response"; command: "cancel_task"; success: true }
+	| { id?: string; type: "response"; command: "background_task"; success: true }
+	| { id?: string; type: "response"; command: "set_subagent_concurrency"; success: true }
+	| { id?: string; type: "response"; command: "set_subagent_timeout"; success: true }
+
+	// Custom sub-agent definitions
+	| { id?: string; type: "response"; command: "list_agents"; success: true; data: { agents: SubagentConfig[] } }
+	| { id?: string; type: "response"; command: "get_agent"; success: true; data: { agent: SubagentConfig | null } }
+	| { id?: string; type: "response"; command: "save_agent"; success: true; data: { agents: SubagentConfig[] } }
+	| { id?: string; type: "response"; command: "delete_agent"; success: true; data: { agents: SubagentConfig[] } }
 
 	// Error response (any command can fail)
 	| { id?: string; type: "response"; command: string; success: false; error: string };

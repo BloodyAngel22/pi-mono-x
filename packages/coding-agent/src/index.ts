@@ -243,6 +243,7 @@ export {
 	type SubagentSessionFactory,
 	type SubagentTask,
 	type SubagentTaskStatus,
+	type SubagentToolCallEntry,
 	setGlobalSubagentManager,
 } from "./core/subagent/index.js";
 // Tools

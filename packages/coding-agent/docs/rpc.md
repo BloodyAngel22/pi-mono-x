@@ -186,7 +186,9 @@ Response:
     "contextPruningEnabled": true,
     "messageCount": 5,
     "pendingMessageCount": 0,
-    "planMode": {"active": false}
+    "planMode": {"active": false},
+    "subagentConcurrencyLimit": 3,
+    "subagentDefaultTimeoutMs": 300000
   }
 }
 ```
@@ -892,6 +894,163 @@ Response:
 ```
 
 The current session name is available via `get_state` in the `sessionName` field.
+
+### Sub-agents
+
+See [subagents.md](./subagents.md) for the full concept (the `task` tool, custom agent `.md`
+files, concurrency, etc). This section documents the RPC surface for observing and managing
+sub-agent tasks and custom agent definitions from a client.
+
+#### get_subagent_tasks
+
+List all known sub-agent tasks for the session (running, queued, backgrounded, and recently
+completed).
+
+```json
+{"type": "get_subagent_tasks"}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "get_subagent_tasks",
+  "success": true,
+  "data": {
+    "tasks": [
+      {
+        "id": "a1b2c3d4",
+        "label": "Explore auth flow",
+        "status": "queued",
+        "startedAt": 1732000000000,
+        "queuedAt": 1732000000000,
+        "agentName": "security-reviewer",
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "savedTokens": 0,
+        "toolCalls": []
+      }
+    ]
+  }
+}
+```
+
+`status` is one of `pending | queued | running | done | error | background`. `toolCalls` is a
+capped, live-updating array of `{ toolCallId, toolName, args, status, output, startedAt, completedAt }`
+entries — the sub-agent's own structured tool-call transcript (in addition to the older
+`recentActivities` string summary).
+
+#### cancel_task
+
+Cancel a running or queued task by id (the id from `get_subagent_tasks`, or `details.taskId`
+on the `task` tool's result).
+
+```json
+{"type": "cancel_task", "taskId": "a1b2c3d4"}
+```
+
+Response: `{"type": "response", "command": "cancel_task", "success": true}`, or an error
+response if the id is unknown or the task already finished.
+
+#### background_task
+
+Let a running task keep working without blocking the `task` tool call on its result.
+
+```json
+{"type": "background_task", "taskId": "a1b2c3d4"}
+```
+
+Response: `{"type": "response", "command": "background_task", "success": true}`.
+
+#### set_subagent_concurrency
+
+Set how many sub-agent tasks may run in parallel (default 3, clamped to 1-10). Tasks beyond
+the limit are queued (`status: "queued"`) until a slot frees up.
+
+```json
+{"type": "set_subagent_concurrency", "limit": 5}
+```
+
+Response: `{"type": "response", "command": "set_subagent_concurrency", "success": true}`.
+
+#### set_subagent_timeout
+
+Set the default per-task timeout in milliseconds (default 5 minutes, clamped to 30s-30min).
+
+```json
+{"type": "set_subagent_timeout", "timeoutMs": 600000}
+```
+
+Response: `{"type": "response", "command": "set_subagent_timeout", "success": true}`.
+
+The current concurrency limit and default timeout are also reflected in `get_state`'s
+`subagentConcurrencyLimit` / `subagentDefaultTimeoutMs` fields.
+
+#### list_agents / get_agent
+
+List, or fetch by name, the custom sub-agent definitions (`.pi/agents/*.md` and
+`~/.pi/agent/agents/*.md`) currently loaded for the session.
+
+```json
+{"type": "list_agents"}
+```
+```json
+{"type": "get_agent", "name": "security-reviewer"}
+```
+
+Response (`list_agents`):
+```json
+{
+  "type": "response",
+  "command": "list_agents",
+  "success": true,
+  "data": { "agents": [ { "name": "security-reviewer", "description": "...", "systemPrompt": "...", "tools": ["read", "grep"], "mcpTools": ["context7_*"], "model": "sonnet", "sourcePath": "/path/to/security-reviewer.md", "source": "project" } ] }
+}
+```
+
+`get_agent`'s `data.agent` is `null` if no agent with that name exists.
+
+#### save_agent
+
+Create or update a custom agent definition, writing (or rewriting) its `.md` file. Returns
+the refreshed full agent list, which also immediately becomes available to `task(agent: "...")`.
+
+```json
+{
+  "type": "save_agent",
+  "name": "security-reviewer",
+  "description": "Reviews code for security vulnerabilities",
+  "systemPrompt": "You are a security-focused code reviewer...",
+  "tools": ["read", "grep", "find", "ls", "bash"],
+  "mcpTools": ["searxng_*", "context7_*"],
+  "model": "sonnet",
+  "source": "project"
+}
+```
+
+To rename an existing agent, pass `originalName` (the old file is deleted after the new one
+is written):
+```json
+{"type": "save_agent", "name": "new-name", "originalName": "old-name", "description": "...", "systemPrompt": "...", "source": "project"}
+```
+
+Response:
+```json
+{"type": "response", "command": "save_agent", "success": true, "data": { "agents": [ /* full updated list */ ] }}
+```
+
+#### delete_agent
+
+Delete a custom agent definition's `.md` file. Returns the refreshed full agent list.
+
+```json
+{"type": "delete_agent", "name": "security-reviewer", "source": "project"}
+```
+
+Response:
+```json
+{"type": "response", "command": "delete_agent", "success": true, "data": { "agents": [ /* full updated list */ ] }}
+```
 
 ### Commands
 
