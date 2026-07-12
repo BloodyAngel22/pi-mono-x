@@ -520,6 +520,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		autoCompactionEnabled: target.autoCompactionEnabled,
 		contextPruningEnabled: target.contextPruningEnabled,
 		fileManifestEnabled: target.fileManifestEnabled,
+		notificationEnabled: target.notificationEnabled,
+		notificationSoundEnabled: target.notificationSoundEnabled,
+		notificationSoundPath: target.notificationSoundPath,
 		autoRetryEnabled: target.autoRetryEnabled,
 		isRetrying: target.isRetrying,
 		retryAttempt: target.retryAttempt,
@@ -1098,6 +1101,21 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "set_file_manifest": {
 				targetSession.setFileManifestEnabled(command.enabled);
 				return success(id, "set_file_manifest");
+			}
+
+			case "set_notification_enabled": {
+				targetSession.setNotificationEnabled(command.enabled);
+				return success(id, "set_notification_enabled");
+			}
+
+			case "set_notification_sound_enabled": {
+				targetSession.setNotificationSoundEnabled(command.enabled);
+				return success(id, "set_notification_sound_enabled");
+			}
+
+			case "set_notification_sound_path": {
+				targetSession.setNotificationSoundPath(command.path);
+				return success(id, "set_notification_sound_path");
 			}
 
 			// =================================================================

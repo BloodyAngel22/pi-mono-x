@@ -184,6 +184,9 @@ Response:
     "sessionName": "my-feature-work",
     "autoCompactionEnabled": true,
     "contextPruningEnabled": true,
+    "notificationEnabled": true,
+    "notificationSoundEnabled": true,
+    "notificationSoundPath": null,
     "messageCount": 5,
     "pendingMessageCount": 0,
     "planMode": {"active": false},
@@ -508,6 +511,57 @@ the session log, and is recomputed fresh (not accumulated) on every call. Enable
 Response:
 ```json
 {"type": "response", "command": "set_file_manifest", "success": true}
+```
+
+### Notifications
+
+Notifications fire once per user request, when the agent goes fully idle (`agent_end`) — not
+per internal turn. Two independent channels: a visual OS notification (`notify-send` on Linux,
+a toast on Windows, OSC terminal escapes elsewhere) and a sound. RPC clients that show their own
+native notification (e.g. Pi Pine) should set the `PI_RPC_CLIENT_NOTIFIES=1` environment
+variable when spawning the agent process to suppress the visual channel — the sound still plays
+regardless, since such clients don't play one themselves.
+
+#### set_notification_enabled
+
+Enable or disable the OS-level visual notification. Enabled by default; has no effect when the
+client sets `PI_RPC_CLIENT_NOTIFIES=1`.
+
+```json
+{"type": "set_notification_enabled", "enabled": true}
+```
+
+Response:
+```json
+{"type": "response", "command": "set_notification_enabled", "success": true}
+```
+
+#### set_notification_sound_enabled
+
+Enable or disable the notification sound. Enabled by default.
+
+```json
+{"type": "set_notification_sound_enabled", "enabled": true}
+```
+
+Response:
+```json
+{"type": "response", "command": "set_notification_sound_enabled", "success": true}
+```
+
+#### set_notification_sound_path
+
+Set a custom sound file (or command, on platforms/setups that use one) to play on `agent_end`.
+Omitting `path` resets to the built-in default sound. The `PI_NOTIFY_SOUND_CMD` environment
+variable, if set, takes precedence over this setting.
+
+```json
+{"type": "set_notification_sound_path", "path": "/home/user/sounds/ding.oga"}
+```
+
+Response:
+```json
+{"type": "response", "command": "set_notification_sound_path", "success": true}
 ```
 
 ### Plan Mode

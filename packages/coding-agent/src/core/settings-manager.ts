@@ -91,6 +91,12 @@ export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 }
 
+export interface NotificationSettings {
+	enabled?: boolean; // default: true — OS-level visual notification (notify-send/toast/OSC) on agent_end
+	soundEnabled?: boolean; // default: true — play a sound on agent_end
+	soundPath?: string; // custom sound file/command; unset falls back to the built-in default sound
+}
+
 export type TransportSetting = Transport;
 
 /**
@@ -150,6 +156,7 @@ export interface Settings {
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
 	toolVerbosity?: ToolVerbositySettings; // Per-tool output verbosity level
 	webSearch?: WebSearchSettings; // Configuration for the web_search tool
+	notifications?: NotificationSettings;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -1145,6 +1152,45 @@ export class SettingsManager {
 	setWarnings(warnings: WarningSettings): void {
 		this.globalSettings.warnings = { ...warnings };
 		this.markModified("warnings");
+		this.save();
+	}
+
+	getNotificationEnabled(): boolean {
+		return this.settings.notifications?.enabled ?? true;
+	}
+
+	setNotificationEnabled(enabled: boolean): void {
+		if (!this.globalSettings.notifications) {
+			this.globalSettings.notifications = {};
+		}
+		this.globalSettings.notifications.enabled = enabled;
+		this.markModified("notifications", "enabled");
+		this.save();
+	}
+
+	getNotificationSoundEnabled(): boolean {
+		return this.settings.notifications?.soundEnabled ?? true;
+	}
+
+	setNotificationSoundEnabled(enabled: boolean): void {
+		if (!this.globalSettings.notifications) {
+			this.globalSettings.notifications = {};
+		}
+		this.globalSettings.notifications.soundEnabled = enabled;
+		this.markModified("notifications", "soundEnabled");
+		this.save();
+	}
+
+	getNotificationSoundPath(): string | undefined {
+		return this.settings.notifications?.soundPath;
+	}
+
+	setNotificationSoundPath(path: string | undefined): void {
+		if (!this.globalSettings.notifications) {
+			this.globalSettings.notifications = {};
+		}
+		this.globalSettings.notifications.soundPath = path;
+		this.markModified("notifications", "soundPath");
 		this.save();
 	}
 

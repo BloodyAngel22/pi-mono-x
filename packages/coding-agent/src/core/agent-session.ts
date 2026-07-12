@@ -85,6 +85,7 @@ import { type HookEventName, runHooks } from "./hooks.js";
 import { type MarkdownCommand, matchMarkdownCommand } from "./markdown-commands.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
+import { sendAgentEndNotification } from "./notify.js";
 import {
 	generalizeBashPermissionMatch,
 	type PermissionAskCallback,
@@ -878,6 +879,7 @@ export class AgentSession {
 		} else if (event.type === "agent_end") {
 			await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
 			this._runHooks("agent_end", { type: "agent_end", cwd: this._cwd, messageCount: event.messages.length });
+			sendAgentEndNotification(this.settingsManager);
 		} else if (event.type === "turn_start") {
 			const extensionEvent: TurnStartEvent = {
 				type: "turn_start",
@@ -2639,6 +2641,35 @@ export class AgentSession {
 	/** Whether the file manifest note is enabled */
 	get fileManifestEnabled(): boolean {
 		return this.settingsManager.getFileManifestEnabled();
+	}
+
+	/** Toggle the OS-level visual notification (notify-send/toast/OSC) shown on agent_end. */
+	setNotificationEnabled(enabled: boolean): void {
+		this.settingsManager.setNotificationEnabled(enabled);
+	}
+
+	/** Whether the OS-level visual notification is enabled */
+	get notificationEnabled(): boolean {
+		return this.settingsManager.getNotificationEnabled();
+	}
+
+	/** Toggle the notification sound played on agent_end. */
+	setNotificationSoundEnabled(enabled: boolean): void {
+		this.settingsManager.setNotificationSoundEnabled(enabled);
+	}
+
+	/** Whether the notification sound is enabled */
+	get notificationSoundEnabled(): boolean {
+		return this.settingsManager.getNotificationSoundEnabled();
+	}
+
+	/** Custom notification sound file/command; unset uses the built-in default. */
+	setNotificationSoundPath(path: string | undefined): void {
+		this.settingsManager.setNotificationSoundPath(path);
+	}
+
+	get notificationSoundPath(): string | undefined {
+		return this.settingsManager.getNotificationSoundPath();
 	}
 
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {

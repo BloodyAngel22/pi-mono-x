@@ -76,6 +76,11 @@ export type RpcCommand =
 		| { id?: string; type: "set_context_pruning"; enabled: boolean }
 		| { id?: string; type: "set_file_manifest"; enabled: boolean }
 
+		// Notifications
+		| { id?: string; type: "set_notification_enabled"; enabled: boolean }
+		| { id?: string; type: "set_notification_sound_enabled"; enabled: boolean }
+		| { id?: string; type: "set_notification_sound_path"; path?: string }
+
 		// Plan mode
 		| { id?: string; type: "enter_plan_mode"; name?: string }
 		| { id?: string; type: "exit_plan_mode" }
@@ -200,6 +205,9 @@ export interface RpcSessionState {
 	autoCompactionEnabled: boolean;
 	contextPruningEnabled: boolean;
 	fileManifestEnabled: boolean;
+	notificationEnabled: boolean;
+	notificationSoundEnabled: boolean;
+	notificationSoundPath?: string;
 	autoRetryEnabled: boolean;
 	isRetrying: boolean;
 	retryAttempt: number;
@@ -343,6 +351,9 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "set_auto_compaction"; success: true }
 	| { id?: string; type: "response"; command: "set_context_pruning"; success: true }
 	| { id?: string; type: "response"; command: "set_file_manifest"; success: true }
+	| { id?: string; type: "response"; command: "set_notification_enabled"; success: true }
+	| { id?: string; type: "response"; command: "set_notification_sound_enabled"; success: true }
+	| { id?: string; type: "response"; command: "set_notification_sound_path"; success: true }
 
 	// Plan mode
 	| { id?: string; type: "response"; command: "enter_plan_mode"; success: true; data: { planFilePath: string } }
