@@ -441,13 +441,32 @@ export default function (pi: ExtensionAPI): void {
 		agents = loadAgents(cwd, agentDir);
 		mgr.setAgents(agents);
 
-		// Collect MCP tool definitions from the extension runner
+		// Collect MCP/extension tool definitions from the extension runner.
+		// ctx.getAllTools() only returns metadata (no execute), so each forwarded
+		// tool proxies its execution back through the parent session's invokeTool —
+		// the sub-agent has no extensions of its own to run these directly.
 		try {
 			const allTools: any[] = ctx.getAllTools?.() ?? [];
-			mcpToolDefs = allTools.filter((t: any) => {
-				const name: string = t.name ?? "";
-				return name.includes("_") && !["read", "bash", "edit", "write", "grep", "find", "ls", "task", "compress"].includes(name);
-			});
+			const excludedNonBuiltin = new Set(["task", "cancel_task", "background_task", "compress"]);
+			mcpToolDefs = allTools
+				.filter((t: any) => t.sourceInfo?.source !== "builtin" && !excludedNonBuiltin.has(t.name))
+				.map(
+					(t: any): ToolDefinition => ({
+						name: t.name,
+						label: t.name,
+						description: t.description,
+						parameters: t.parameters,
+						execute: async (_toolCallId: string, params: Record<string, unknown>) => {
+							try {
+								const text = await currentCtx?.invokeTool?.(t.name, params);
+								return { content: [{ type: "text" as const, text: text ?? "" }] };
+							} catch (err: unknown) {
+								const message = err instanceof Error ? err.message : String(err);
+								return { content: [{ type: "text" as const, text: message }], isError: true };
+							}
+						},
+					}),
+				);
 		} catch {
 			mcpToolDefs = [];
 		}

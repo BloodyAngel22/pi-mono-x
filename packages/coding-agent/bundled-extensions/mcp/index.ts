@@ -25,8 +25,7 @@ interface McpConfig {
 }
 
 type McpServerStatus = {
-  /** "idle" — tools registered from the schema cache, server process not spawned yet. */
-  status: "connected" | "error" | "connecting" | "retrying" | "idle";
+  status: "connected" | "error" | "connecting" | "retrying";
   error?: string;
   attempt?: number;
   nextRetryAt?: number;
@@ -37,8 +36,8 @@ type LogFn = (msg: string, ...args: any[]) => void;
 const SOFT_STARTUP_TIMEOUT_MS = 5000;
 const INITIAL_RETRY_DELAY_MS = 5000;
 const MAX_RETRY_DELAY_MS = 60000;
-/** How long a lazy first-tool-call waits for its server to come up. */
-const LAZY_CONNECT_TIMEOUT_MS = 30000;
+/** How long a tool call waits for its server's connection attempt to finish, if it hasn't already. */
+const CONNECT_WAIT_TIMEOUT_MS = 30000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -50,60 +49,24 @@ function configHash(cfg: McpServerConfig): string {
 }
 
 // ---------------------------------------------------------------------------
-// On-disk tool-schema cache → lazy server startup.
-//
-// Spawning an MCP server just to learn its tool list is the expensive part:
-// with dozens of enabled servers every app launch used to fork that many
-// uvx/npx processes (50-150MB RSS each) which then sat idle forever. The
-// cache remembers each server's tools/list result (keyed by configHash, so a
-// changed command/args/env invalidates it). On session_start a cache hit
-// registers the tools immediately WITHOUT spawning the server ("idle"
-// status); the process is only spawned on the first real tool call
-// (ensureConnected below). Cache misses — new or reconfigured servers —
-// connect eagerly as before and seed the cache.
-// ---------------------------------------------------------------------------
-
-interface ToolsCacheEntry {
-  name: string;
-  tools: Tool[];
-  cachedAt: number;
-}
-
-function toolsCachePath(): string {
-  return path.join(homedir(), ".pi", "agent", "mcp", "tools-cache.json");
-}
-
-function readToolsCache(): Record<string, ToolsCacheEntry> {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(toolsCachePath(), "utf-8"));
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, ToolsCacheEntry>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeToolsCacheEntry(hash: string, name: string, tools: Tool[]): void {
-  try {
-    const cache = readToolsCache();
-    cache[hash] = { name, tools, cachedAt: Date.now() };
-    fs.writeFileSync(toolsCachePath(), JSON.stringify(cache, null, 2));
-  } catch {
-    // The cache is purely an optimization — on write failure just go without it.
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Process-wide MCP client sharing.
 //
-// This extension module is re-executed for every session (extensions load
-// through a fresh, non-caching jiti instance per session — see
-// core/extensions/loader.ts), so ordinary module-scoped state does NOT
-// survive across sessions/tabs. To actually share spawned MCP server
-// processes across concurrently open tabs within one `pi --mode rpc`
-// process, the registry lives on `globalThis` (keyed by a global symbol so
-// it survives re-execution of this module), refcounted per server so a
-// server process is only spawned once per distinct config and only closed
-// once the last tab using it goes away.
+// This extension module's factory (the `export default` below) is loaded
+// through a fresh, non-caching jiti instance per *ResourceLoader* (see
+// core/extensions/loader.ts) — but ResourceLoader instances are themselves
+// reused across `fork`/`clone`/`switch_session`/`new_session` when they
+// share a cwd (see `sameCwd` reuse in rpc-mode.ts, added to avoid re-running
+// every extension's factory on every new tab). So this factory can run only
+// ONCE for several concurrently open sessions/tabs, meaning ordinary
+// module-scope state here is shared by all of them, not private to one —
+// see the `sessionStates` map below, which is what makes per-session
+// bookkeeping (acquired refs) actually per-session again.
+//
+// To share spawned MCP server processes across concurrently open tabs
+// within one `pi --mode rpc` process, the registry lives on `globalThis`
+// (keyed by a global symbol so it survives re-execution of this module),
+// refcounted per server so a server process is only spawned once per
+// distinct config and only closed once the last tab using it goes away.
 //
 // Also read directly by core's `rpc-mode.ts` (get_mcp_status) to expose
 // per-server status/tools over RPC — that file duplicates (does not import)
@@ -288,7 +251,6 @@ function startConnectLoop(key: string, entry: SharedMcpEntry, serverConfig: McpS
       entry.client = client;
       entry.tools = tools;
       entry.status = { status: "connected", attempt: attemptNo };
-      writeToolsCacheEntry(entry.configHash, entry.name, tools);
       log(`Registered ${tools.length} tools from ${entry.name} (shared)`);
       notifyStatus(entry);
     } catch (error: any) {
@@ -308,23 +270,15 @@ function startConnectLoop(key: string, entry: SharedMcpEntry, serverConfig: McpS
 
 /**
  * Acquire a reference to the shared MCP client for `name`/`serverConfig`,
- * starting it (with retry/backoff) if nobody else has it running yet.
- * Returns the registry key actually used — normally `name`, but if a
- * differently-configured entry for the same name is already live (e.g. the
- * on-disk config changed between sessions), a private, non-shared entry is
- * used instead so two different configs never get mixed under one client.
- *
- * When `cachedTools` is provided (schema-cache hit), the entry is created in
- * "idle" state with those tools and the server process is NOT spawned; the
- * first real tool call connects it via `ensureConnected`.
+ * starting it (with retry/backoff) immediately if nobody else has it running
+ * yet — every enabled server connects at session_start, no matter how much
+ * later its tools actually get called. Returns the registry key actually
+ * used — normally `name`, but if a differently-configured entry for the same
+ * name is already live (e.g. the on-disk config changed between sessions), a
+ * private, non-shared entry is used instead so two different configs never
+ * get mixed under one client.
  */
-function acquireSharedServer(
-  name: string,
-  serverConfig: McpServerConfig,
-  log: LogFn,
-  onStatusChange: () => void,
-  cachedTools?: Tool[] | null,
-): string {
+function acquireSharedServer(name: string, serverConfig: McpServerConfig, log: LogFn, onStatusChange: () => void): string {
   const registry = getRegistry();
   const hash = configHash(serverConfig);
   let key = name;
@@ -333,15 +287,14 @@ function acquireSharedServer(
     key = `${name}::${hash}`;
     entry = registry.get(key);
   }
-  const lazy = cachedTools != null && cachedTools.length > 0;
   if (!entry) {
     entry = {
       name,
       configHash: hash,
       refCount: 0,
       client: null,
-      tools: lazy ? cachedTools : null,
-      status: { status: lazy ? "idle" : "connecting" },
+      tools: null,
+      status: { status: "connecting" },
       generation: 0,
       statusListeners: new Set(),
     };
@@ -349,20 +302,19 @@ function acquireSharedServer(
   }
   entry.refCount++;
   entry.statusListeners.add(onStatusChange);
-  // generation === 0 → no connect loop has ever started for this entry.
-  // Lazy entries stay that way until the first tool call (ensureConnected).
-  if (!entry.client && entry.generation === 0 && !lazy) {
+  if (!entry.client && entry.generation === 0) {
     startConnectLoop(key, entry, serverConfig, log);
   }
   return key;
 }
 
 /**
- * Resolve a live client for `key`, spawning/connecting the server on demand
- * if it's still idle (lazy schema-cache start) or reconnecting. Resolves as
- * soon as the shared entry has a client; rejects on the first failed connect
- * attempt (the background retry loop keeps going — a later call may succeed)
- * or after `LAZY_CONNECT_TIMEOUT_MS`.
+ * Resolve a live client for `key`. The connect loop is already running (or
+ * done) by the time this is called — started eagerly by `acquireSharedServer`
+ * at session_start — so this just waits for it to finish if it's still in
+ * flight. Resolves as soon as the shared entry has a client; rejects on the
+ * first failed connect attempt (the background retry loop keeps going — a
+ * later call may succeed) or after `CONNECT_WAIT_TIMEOUT_MS`.
  */
 function ensureConnected(key: string, serverConfig: McpServerConfig, log: LogFn): Promise<Client> {
   const registry = getRegistry();
@@ -370,7 +322,6 @@ function ensureConnected(key: string, serverConfig: McpServerConfig, log: LogFn)
   if (!entry) return Promise.reject(new Error(`MCP server for ${key} is not registered`));
   if (entry.client) return Promise.resolve(entry.client);
   if (entry.generation === 0) {
-    log(`Lazy-connecting ${entry.name} on first tool call`);
     startConnectLoop(key, entry, serverConfig, log);
   }
   return new Promise<Client>((resolve, reject) => {
@@ -380,8 +331,8 @@ function ensureConnected(key: string, serverConfig: McpServerConfig, log: LogFn)
     };
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(`${entry.name}: MCP server did not connect within ${LAZY_CONNECT_TIMEOUT_MS / 1000}s`));
-    }, LAZY_CONNECT_TIMEOUT_MS);
+      reject(new Error(`${entry.name}: MCP server did not connect within ${CONNECT_WAIT_TIMEOUT_MS / 1000}s`));
+    }, CONNECT_WAIT_TIMEOUT_MS);
     const listener = () => {
       if (entry.client) {
         cleanup();
@@ -425,7 +376,6 @@ async function forceReconnectSharedServer(name: string, key: string, serverConfi
     entry.client = client;
     entry.tools = tools;
     entry.status = { status: "connected" };
-    writeToolsCacheEntry(entry.configHash, entry.name, tools);
     notifyStatus(entry);
   }
   return { client, tools };
@@ -484,20 +434,34 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 
   const config: McpConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 
-  // Registry keys this session instance currently holds a reference on
-  // (name -> registry key, which may differ from name — see acquireSharedServer).
-  let acquiredKeys: Map<string, string> = new Map();
-  let onStatusChangeRef: () => void = () => {};
+  // Per-session bookkeeping — keyed by the real session id
+  // (ctx.sessionManager.getSessionId()), NOT a bare module-scope variable.
+  // Since this factory can be shared by several concurrently open sessions
+  // (see the comment on the shared-client-registry section above), a plain
+  // module-scope `acquiredKeys` would have one session's session_start /
+  // session_shutdown release or overwrite another session's refs —
+  // corrupting refcounts until some tool call resolves a `key` nobody is
+  // holding anymore ("MCP server for X is not registered").
+  interface PerSessionMcpState {
+    /** name -> registry key this session currently holds a reference on
+     *  (key may differ from name — see acquireSharedServer). */
+    acquiredKeys: Map<string, string>;
+    onStatusChange: () => void;
+  }
+  const sessionStates = new Map<string, PerSessionMcpState>();
 
-  const updateStatus = (ctx: ExtensionContext, total: number): void => {
+  const releaseSessionState = (state: PerSessionMcpState): void => {
+    for (const key of state.acquiredKeys.values()) releaseSharedServer(key, state.onStatusChange);
+    state.acquiredKeys.clear();
+  };
+
+  const updateStatus = (ctx: ExtensionContext, total: number, acquiredKeys: Map<string, string>): void => {
     if (!ctx.hasUI) return;
     const registry = getRegistry();
     const statuses = [...acquiredKeys.values()]
       .map((key) => registry.get(key)?.status)
       .filter((s): s is McpServerStatus => Boolean(s));
-    // "idle" counts as ready: tools are registered (from the schema cache),
-    // the server just hasn't been needed yet.
-    const ready = statuses.filter((s) => s.status === "connected" || s.status === "idle").length;
+    const ready = statuses.filter((s) => s.status === "connected").length;
     const active = statuses.filter((s) => s.status === "connecting" || s.status === "retrying").length;
     if (ready === total) {
       ctx.ui.setStatus("mcp", `✓ MCP: ${ready} ready`);
@@ -508,19 +472,21 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     }
   };
 
-  const releaseAll = () => {
-    for (const key of acquiredKeys.values()) releaseSharedServer(key, onStatusChangeRef);
-    acquiredKeys = new Map();
-  };
-
   pi.on("session_start", async (event, ctx) => {
-    log("Session start: attaching to shared MCP servers");
-
-    // A repeated session_start on the same instance (e.g. ctx.reload())
-    // — release whatever we held before re-acquiring.
-    releaseAll();
-
     const sessionId = ctx.sessionManager.getSessionId();
+    log(`Session start (${sessionId}): attaching to shared MCP servers`);
+
+    // A repeated session_start for a session we've already seen (e.g.
+    // ctx.reload()) — release whatever THIS session held before
+    // re-acquiring. Other sessions' state lives under their own id and is
+    // untouched.
+    const previous = sessionStates.get(sessionId);
+    if (previous) releaseSessionState(previous);
+
+    const acquiredKeys = new Map<string, string>();
+    const state: PerSessionMcpState = { acquiredKeys, onStatusChange: () => {} };
+    sessionStates.set(sessionId, state);
+
     const allEntries = Object.entries(config.mcpServers);
     const serverEntries = allEntries.filter(([, cfg]) => !cfg.disabled);
     const total = serverEntries.length;
@@ -557,9 +523,9 @@ export default async function (pi: ExtensionAPI): Promise<void> {
           parameters: tool.inputSchema as any,
           execute: async (toolCallId, params) => {
             // Resolved at call time (not captured at registration) so a
-            // /mcpauth reconnect elsewhere is picked up automatically. If the
-            // server is still idle (lazy schema-cache start), this is the
-            // moment its process actually gets spawned.
+            // /mcpauth reconnect elsewhere is picked up automatically. The
+            // connect loop already started at session_start; this just waits
+            // for it if it's still in flight.
             const serverConfig = config.mcpServers[name];
             const client =
               getRegistry().get(key)?.client ??
@@ -592,22 +558,19 @@ export default async function (pi: ExtensionAPI): Promise<void> {
       const checkDone = () => {
         if ([...acquiredKeys.keys()].every((n) => registeredServers.has(n))) resolve();
       };
-      onStatusChangeRef = () => {
-        updateStatus(ctx, total);
+      state.onStatusChange = () => {
+        updateStatus(ctx, total, acquiredKeys);
         for (const [name, key] of acquiredKeys) registerToolsFor(name, key);
         checkDone();
       };
-      const toolsCache = readToolsCache();
       for (const [name, serverConfig] of serverEntries) {
-        const cached = toolsCache[configHash(serverConfig)];
-        const key = acquireSharedServer(name, serverConfig, log, onStatusChangeRef, cached?.tools ?? null);
+        const key = acquireSharedServer(name, serverConfig, log, state.onStatusChange);
         acquiredKeys.set(name, key);
       }
       publishSessionServers();
-      // Servers already running for another tab — or idle with cached tool
-      // schemas — are ready immediately.
+      // Servers already running for another tab are ready immediately.
       for (const [name, key] of acquiredKeys) registerToolsFor(name, key);
-      updateStatus(ctx, total);
+      updateStatus(ctx, total, acquiredKeys);
       checkDone();
     });
 
@@ -620,6 +583,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     description: "List configured MCP servers and their status",
     handler: async (args, ctx) => {
       const theme = ctx.ui.theme;
+      const acquiredKeys = sessionStates.get(ctx.sessionManager.getSessionId())?.acquiredKeys ?? new Map<string, string>();
       await ctx.ui.custom((ui, theme, keybindings, done) => {
         return {
           render: (width: number) => {
@@ -748,7 +712,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
               // Reconnect the SHARED entry — every tab currently using this
               // server picks up the freshly authenticated client on its
               // next tool call (see registerToolsFor's execute lookup).
-              const key = acquiredKeys.get(serverName) ?? serverName;
+              const key = sessionStates.get(ctx.sessionManager.getSessionId())?.acquiredKeys.get(serverName) ?? serverName;
               const { tools } = await forceReconnectSharedServer(serverName, key, serverConfig, log);
 
               // Re-register tools for THIS session in case names/schemas changed.
@@ -795,9 +759,14 @@ export default async function (pi: ExtensionAPI): Promise<void> {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    log("Session shutdown: releasing shared MCP servers");
-    releaseAll();
-    getSessionServersRegistry().delete(ctx.sessionManager.getSessionId());
+    const sessionId = ctx.sessionManager.getSessionId();
+    log(`Session shutdown (${sessionId}): releasing shared MCP servers`);
+    const state = sessionStates.get(sessionId);
+    if (state) {
+      releaseSessionState(state);
+      sessionStates.delete(sessionId);
+    }
+    getSessionServersRegistry().delete(sessionId);
     flushLog();
   });
 }
